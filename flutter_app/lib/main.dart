@@ -47,7 +47,7 @@ class _BLEControllerPageState extends State<BLEControllerPage> {
   String? watchLastConfirmedColor;
 
   // Impostazioni
-  late SettingsModel settings;
+  SettingsModel? settings;
 
   final String espServiceUuid = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
   final String espCharacteristicUuid = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
@@ -79,10 +79,12 @@ class _BLEControllerPageState extends State<BLEControllerPage> {
   }
 
   Future<void> _openSettings() async {
+    if (settings == null) return;
+
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => SettingsPage(settings: settings),
+        builder: (context) => SettingsPage(settings: settings!),
       ),
     );
     if (result == true) {
@@ -214,12 +216,14 @@ class _BLEControllerPageState extends State<BLEControllerPage> {
   }
 
   Future<void> _sendCommand(String letter) async {
+    if (settings == null) return;
+
     final data = letterData[letter]!;
     final payload = jsonEncode({
       'letter': letter,
       'color': data['colorHex'],
       'colorName': data['colorName'],
-      'settings': settings.toJson(),
+      'settings': settings!.toJson(),
     });
 
     await _sendToDevice(payload);
@@ -232,9 +236,11 @@ class _BLEControllerPageState extends State<BLEControllerPage> {
   }
 
   Future<void> _sendReset() async {
+    if (settings == null) return;
+
     final payload = jsonEncode({
       'command': 'RESET',
-      'settings': settings.toResetJson(),
+      'settings': settings!.toResetJson(),
     });
     await _sendToDevice(payload);
 

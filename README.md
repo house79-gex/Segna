@@ -6,9 +6,30 @@ Sistema professionale di comunicazione in tempo reale tra smartphone, smartwatch
 
 Segna è un'applicazione distribuita che permette il controllo sincronizzato di dispositivi multipli tramite BLE. Il sistema è composto da:
 
-- **App Smartphone (Flutter)**: Interfaccia di controllo principale con 5 pulsanti colorati
-- **App Smartwatch (Wear OS)**: Display visuale per visualizzazione lettere e colori
-- **Firmware ESP32**: Controllore hardware per LED RGB
+- **App Smartphone (Flutter)**: Interfaccia di controllo principale con 5 pulsanti colorati, impostazioni configurabili e feedback visivo
+- **App Smartwatch (Wear OS)**: Display visuale o modalità vibrazione per notifiche discrete
+- **Firmware ESP32**: Controllore hardware per 5 LED singoli separati
+
+### ✨ Nuove Funzionalità
+
+#### Smartphone
+- Nuovo layout UI con pulsanti in colonna centrale verticale
+- Pulsante Reset compatto in basso a destra
+- Schermata impostazioni completa per configurare Watch e ESP32
+- Feedback visivo con bordo colorato quando i dispositivi confermano la ricezione
+- Connessione automatica ai dispositivi durante la scansione
+
+#### Smartwatch
+- Modalità vibrazione: schermo nero con vibrazioni (1-5 volte in base alla lettera)
+- Modalità display: lettera a schermo intero con colore di sfondo
+- Vibrazione prolungata per reset
+- Invio conferme BLE allo smartphone
+
+#### ESP32
+- 5 LED singoli separati (uno per colore) invece di LED RGB
+- LED sempre acceso o temporizzato (configurabile)
+- Funzione lampeggio di tutti i LED per reset/avviso
+- Invio conferme BLE allo smartphone
 
 ## 🏗️ Architettura del Sistema
 
@@ -28,8 +49,9 @@ Segna è un'applicazione distribuita che permette il controllo sincronizzato di 
    │   SMARTWATCH     │          │      ESP32        │
    │   (Wear OS)      │          │  (BLE Server)     │
    ├──────────────────┤          ├───────────────────┤
-   │ Display Lettera  │          │ Controllo LED RGB │
-   │ + Colore Sfondo  │          │ GPIO 25, 26, 27   │
+   │ Display Lettera  │          │ 5 LED Singoli     │
+   │ + Colore Sfondo  │          │ GPIO 25,26,27     │
+   │ O Vibrazione     │          │ GPIO 32,33        │
    └──────────────────┘          └───────────────────┘
 
 Protocollo: JSON via BLE
@@ -55,7 +77,10 @@ Segna/
 ├── flutter_app/
 │   ├── pubspec.yaml                    # Dipendenze Flutter
 │   ├── lib/
-│   │   └── main.dart                   # App principale smartphone
+│   │   ├── main.dart                   # App principale smartphone
+│   │   ├── settings_page.dart          # Schermata impostazioni
+│   │   └── models/
+│   │       └── settings_model.dart     # Modello dati impostazioni
 │   └── android/
 │       └── app/
 │           └── src/
@@ -143,7 +168,8 @@ dependencies {
 #### Prerequisiti
 - ESP32 DevKit (qualsiasi modello con supporto BLE)
 - Arduino IDE >= 2.0
-- LED RGB catodo comune o LED strip WS2812B
+- 5 LED singoli (1 bianco, 1 giallo, 1 verde, 1 rosso, 1 blu)
+- 5 resistenze da 220Ω
 
 #### Installazione IDE e Librerie
 ```bash
@@ -164,37 +190,35 @@ dependencies {
 
 #### Schema Collegamenti Hardware
 
-**LED RGB Catodo Comune:**
+**5 LED Singoli:**
 ```
-ESP32          LED RGB
-GPIO 25  ----> Pin Rosso (R)
-GPIO 26  ----> Pin Verde (G)
-GPIO 27  ----> Pin Blu (B)
-GND      ----> Catodo Comune (-)
+ESP32          LED
+GPIO 25  ----> LED Bianco (Lettera A) + Resistenza 220Ω ----> GND
+GPIO 26  ----> LED Giallo (Lettera B) + Resistenza 220Ω ----> GND
+GPIO 27  ----> LED Verde  (Lettera C) + Resistenza 220Ω ----> GND
+GPIO 32  ----> LED Rosso  (Lettera D) + Resistenza 220Ω ----> GND
+GPIO 33  ----> LED Blu    (Lettera E) + Resistenza 220Ω ----> GND
 
-Note: Aggiungi resistenze da 220Ω in serie su ogni pin colore
+Note: Ogni LED ha la sua resistenza in serie da 220Ω
 ```
 
 **Diagramma:**
 ```
                     ┌─────────┐
-     GPIO 25 ──┬────┤ 220Ω R  ├───┐
-               │    └─────────┘   │
-     GPIO 26 ──┼────┬─────────┐   │      ┌────────┐
-               │    │ 220Ω    │   ├──────┤  LED   │
-     GPIO 27 ──┼────┼─────┬───┤   │      │  RGB   │
-               │    │     │220Ω   │      │        │
-               │    │     └───────┘      └────┬───┘
-               │    │                          │
-        GND ───┴────┴──────────────────────────┘
-```
-
-**LED Strip WS2812B (opzionale):**
-```
-ESP32          WS2812B
-GPIO 23  ----> DIN (Data In)
-5V       ----> VCC
-GND      ----> GND
+     GPIO 25 ──────┤ 220Ω    ├──── LED Bianco ──┐
+                   └─────────┘                   │
+                    ┌─────────┐                  │
+     GPIO 26 ──────┤ 220Ω    ├──── LED Giallo ──┤
+                   └─────────┘                   │
+                    ┌─────────┐                  ├──── GND
+     GPIO 27 ──────┤ 220Ω    ├──── LED Verde  ──┤
+                   └─────────┘                   │
+                    ┌─────────┐                  │
+     GPIO 32 ──────┤ 220Ω    ├──── LED Rosso  ──┤
+                   └─────────┘                   │
+                    ┌─────────┐                  │
+     GPIO 33 ──────┤ 220Ω    ├──── LED Blu    ──┘
+                   └─────────┘
 ```
 
 #### Upload Firmware
@@ -219,26 +243,34 @@ GND      ----> GND
 ### Avvio del Sistema
 
 1. **Accendi l'ESP32**
-   - Il LED farà un test con i colori Rosso > Verde > Blu
+   - I LED faranno un test sequenziale (Bianco > Giallo > Verde > Rosso > Blu)
    - Sul Serial Monitor vedrai: "BLE Server pronto!"
 
 2. **Apri l'App Smartwatch**
    - Sarà visibile come dispositivo BLE "Galaxy Watch 5"
 
 3. **Apri l'App Smartphone**
-   - Tocca "Scansiona" per cercare dispositivi BLE
-   - Connetti a "ESP32-Segna" e "Galaxy Watch 5"
+   - Tocca l'icona Bluetooth in alto a destra per scansionare dispositivi BLE
+   - L'app si connetterà automaticamente a "ESP32-Segna" e "Galaxy Watch"
    - Gli indicatori di stato diventeranno verdi
+
+4. **Configura le Impostazioni (opzionale)**
+   - Tocca l'icona ingranaggio (⚙️) in alto a sinistra
+   - Configura le opzioni per Smartwatch (vibrazione) e ESP32 (LED)
+   - Salva le impostazioni
 
 ### Invio Comandi
 
 1. **Tocca un pulsante lettera (A, B, C, D, E)**
-   - Lo smartwatch mostrerà la lettera a schermo intero con sfondo colorato
-   - Il LED ESP32 si accenderà del colore corrispondente
+   - Se modalità display: lo smartwatch mostrerà la lettera a schermo intero con sfondo colorato
+   - Se modalità vibrazione: lo smartwatch vibrerà 1-5 volte in base alla lettera
+   - Il LED ESP32 corrispondente si accenderà
+   - Gli indicatori dello smartphone mostreranno un bordo colorato quando i dispositivi confermano
 
-2. **Tocca RESET**
-   - Lo smartwatch diventerà nero
-   - Il LED ESP32 si spegnerà
+2. **Tocca RESET (in basso a destra)**
+   - Lo smartwatch vibrerà (se abilitato) e tornerà allo stato iniziale
+   - L'ESP32 lampeggerà tutti i LED (se abilitato) e li spegnerà
+   - Gli indicatori dello smartphone perderanno il bordo colorato
 
 ### Esempio di Payload BLE
 
@@ -247,14 +279,48 @@ GND      ----> GND
 {
   "letter": "A",
   "color": "#FFFFFF",
-  "colorName": "WHITE"
+  "colorName": "WHITE",
+  "settings": {
+    "watch": {
+      "vibrationMode": true,
+      "vibrationDuration": 300,
+      "vibrationPause": 200
+    },
+    "esp32": {
+      "alwaysOn": true,
+      "duration": 3000,
+      "blinkAlert": false,
+      "blinkCount": 3,
+      "blinkDuration": 200
+    }
+  }
 }
 ```
 
 **Comando Reset:**
 ```json
 {
-  "command": "RESET"
+  "command": "RESET",
+  "settings": {
+    "watch": {
+      "vibrationEnabled": true,
+      "vibrationDuration": 800
+    },
+    "esp32": {
+      "blinkAlert": true,
+      "blinkCount": 3,
+      "blinkDuration": 200
+    }
+  }
+}
+```
+
+**Conferma Ricezione:**
+```json
+{
+  "status": "received",
+  "device": "esp32",
+  "color": "#FFFFFF"
 }
 ```
 
@@ -345,6 +411,7 @@ flutter logs
 ### Flutter
 - `flutter_blue_plus: ^1.31.0` - Gestione BLE
 - `permission_handler: ^11.0.1` - Gestione permessi Android
+- `shared_preferences: ^2.2.2` - Persistenza impostazioni
 
 ### ESP32
 - `ArduinoJson` - Parsing JSON
@@ -359,8 +426,8 @@ flutter logs
 
 - **Service UUID**: `4fafc201-1fb5-459e-8fcc-c5c9c331914b`
 - **Characteristic UUID**: `beb5483e-36e1-4688-b7f5-ea07361b26a8`
-- **Properties**: READ, WRITE
-- **Max Payload**: 256 bytes
+- **Properties**: READ, WRITE, NOTIFY
+- **Max Payload**: 512 bytes
 - **Encoding**: UTF-8
 
 ## 👥 Dispositivi Testati
@@ -375,16 +442,26 @@ flutter logs
 - Il codice è scritto seguendo le best practices per codice pulito e manutenibile
 - Nomi di variabili e funzioni sono descrittivi e in italiano dove appropriato
 - Il sistema supporta connessioni multiple simultanee
-- La comunicazione è unidirezionale (smartphone → watch/ESP32)
-- Non c'è gestione di feedback o ack dai dispositivi riceventi
+- La comunicazione è bidirezionale: smartphone ↔ watch/ESP32
+- Feedback visivo con conferme BLE dai dispositivi riceventi
+- Le impostazioni sono persistenti tramite SharedPreferences
+- JSON payload esteso per includere configurazioni device-specific
 
-## �� Prossimi Sviluppi
+## ✅ Funzionalità Implementate
 
-- [ ] Supporto per LED strip WS2812B
-- [ ] Feedback di stato dai dispositivi riceventi
+- [x] 5 LED singoli separati su ESP32
+- [x] Modalità vibrazione su Smartwatch
+- [x] Feedback di stato dai dispositivi riceventi
+- [x] Sistema di impostazioni configurabile
+- [x] Nuovo layout UI ottimizzato
+- [x] Connessione automatica ai dispositivi
+
+## 🔮 Prossimi Sviluppi
+
 - [ ] Salvataggio sequenze di comandi
 - [ ] Modalità automatica con pattern predefiniti
 - [ ] Supporto iOS
+- [ ] Gestione profili multipli
 
 ## 📄 Licenza
 
