@@ -282,138 +282,145 @@ class _BLEControllerPageState extends State<BLEControllerPage> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: const Text('Segna BLE Controller'),
+        title: const Text('Segna BLE'),
         actions: [
-          // Pulsante Settings
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: _openSettings,
           ),
-          const SizedBox(width: 8),
-          // Indicatore ESP32 con bordo colorato
-          Container(
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: espLastConfirmedColor != null
-                    ? _getColorFromHex(espLastConfirmedColor!)
-                    : Colors.transparent,
-                width: 3,
-              ),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            padding: const EdgeInsets.all(4),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.router,
-                  color: espConnected ? Colors.green : Colors.grey,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  'ESP32',
-                  style: TextStyle(
-                    color: espConnected ? Colors.green : Colors.grey,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          // Indicatore Watch con bordo colorato
-          Container(
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: watchLastConfirmedColor != null
-                    ? _getColorFromHex(watchLastConfirmedColor!)
-                    : Colors.transparent,
-                width: 3,
-              ),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            padding: const EdgeInsets.all(4),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.watch,
-                  color: watchConnected ? Colors.green : Colors.grey,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  'Watch',
-                  style: TextStyle(
-                    color: watchConnected ? Colors.green : Colors.grey,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          // Pulsante Scansiona
-          IconButton(
-            icon: Icon(isScanning
-                ? Icons.hourglass_empty
-                : Icons.bluetooth_searching),
-            onPressed: isScanning ? null : _scanForDevices,
-            tooltip: isScanning ? 'Scansione...' : 'Scansiona',
-          ),
-          const SizedBox(width: 8),
         ],
       ),
       body: Stack(
         children: [
-          // Pulsanti lettere in colonna centrale
-          Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(vertical: 16.0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: letterData.entries.map((entry) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8.0),
-                    child: SizedBox(
-                      width: 200,
-                      height: 80,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: entry.value['color'] as Color,
-                          foregroundColor: entry.key == 'A' ||
-                                  entry.key == 'B' ||
-                                  entry.key == 'C'
-                              ? Colors.black
-                              : Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
-                        onPressed: () => _sendCommand(entry.key),
-                        child: Text(
-                          '${entry.key}\n${entry.value['colorName']}',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
+          Column(
+            children: [
+              const SizedBox(height: 16),
+              // Pulsante Connetti/Scansiona
+              ElevatedButton.icon(
+                icon: Icon(isScanning
+                    ? Icons.hourglass_empty
+                    : Icons.bluetooth_searching),
+                label: Text(isScanning ? 'Scansione...' : 'Connetti'),
+                onPressed: isScanning ? null : _scanForDevices,
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                ),
               ),
-            ),
+              const SizedBox(height: 16),
+              // Icone dispositivi
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: espLastConfirmedColor != null
+                            ? _getColorFromHex(espLastConfirmedColor!)
+                            : Colors.transparent,
+                        width: 3,
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    padding: const EdgeInsets.all(8),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.router,
+                          color: espConnected ? Colors.green : Colors.grey,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'ESP32',
+                          style: TextStyle(
+                            color: espConnected ? Colors.green : Colors.grey,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: watchLastConfirmedColor != null
+                            ? _getColorFromHex(watchLastConfirmedColor!)
+                            : Colors.transparent,
+                        width: 3,
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    padding: const EdgeInsets.all(8),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.watch,
+                          color: watchConnected ? Colors.green : Colors.grey,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Watch',
+                          style: TextStyle(
+                            color: watchConnected ? Colors.green : Colors.grey,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              // Pulsanti lettere in colonna centrale
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(vertical: 16.0),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: letterData.entries.map((entry) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8.0),
+                        child: SizedBox(
+                          width: 200,
+                          height: 60,
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: entry.value['color'] as Color,
+                              foregroundColor: entry.key == 'A' || entry.key == 'B'
+                                  ? Colors.black
+                                  : Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            onPressed: () => _sendCommand(entry.key),
+                            child: Text(
+                              entry.key,
+                              style: const TextStyle(
+                                fontSize: 32,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+            ],
           ),
           // Pulsante Reset piccolo in basso a destra
           Positioned(
             bottom: 16,
             right: 16,
             child: SizedBox(
-              width: 80,
-              height: 80,
+              width: 70,
+              height: 70,
               child: FloatingActionButton(
                 backgroundColor: Colors.black,
                 foregroundColor: Colors.white,
                 onPressed: _sendReset,
                 child: const Text(
-                  'RESET',
+                  'Reset',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 14,
