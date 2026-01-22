@@ -1,8 +1,7 @@
-name: segna_ble_app
-description: App Flutter per comunicazione BLE con smartwatch e ESP32
+name: segna_ble
+description: App per comunicazione BLE tra Smartphone, Smartwatch e ESP32
 
 publish_to: 'none'
-
 version: 1.0.0+1
 
 environment:
@@ -17,7 +16,7 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^2.0.0
+  flutter_lints: ^3.0.0
 
 flutter:
   uses-material-design: true
