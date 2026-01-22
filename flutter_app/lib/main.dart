@@ -73,12 +73,14 @@ class _BLEControllerPageState extends State<BLEControllerPage> {
 
       FlutterBluePlus.scanResults.listen((results) {
         for (ScanResult result in results) {
-          if (result.device.platformName.contains('ESP32') ||
-              result.device.platformName.contains('Segna')) {
+          if (espDevice == null &&
+              (result.device.platformName.contains('ESP32') ||
+                  result.device.platformName.contains('Segna'))) {
             espDevice = result.device;
           }
-          if (result.device.platformName.contains('Galaxy Watch') ||
-              result.device.platformName.contains('Watch')) {
+          if (watchDevice == null &&
+              (result.device.platformName.contains('Galaxy Watch') ||
+                  result.device.platformName.contains('Watch'))) {
             watchDevice = result.device;
           }
         }

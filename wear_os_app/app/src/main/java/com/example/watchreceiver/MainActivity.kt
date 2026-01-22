@@ -140,7 +140,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         bluetoothGattServer?.close()
-        bluetoothLeAdvertiser?.stopAdvertising(object : AdvertiseCallback() {})
+        bluetoothLeAdvertiser?.stopAdvertising(null)
     }
 }
 

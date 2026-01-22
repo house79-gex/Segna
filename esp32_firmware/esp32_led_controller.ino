@@ -33,6 +33,9 @@
 #define GREEN_CHANNEL 1
 #define BLUE_CHANNEL  2
 
+// Dimensione buffer JSON
+#define JSON_BUFFER_SIZE 256
+
 BLEServer* pServer = NULL;
 BLECharacteristic* pCharacteristic = NULL;
 bool deviceConnected = false;
@@ -59,7 +62,7 @@ class MyCallbacks: public BLECharacteristicCallbacks {
         Serial.println(value.c_str());
 
         // Parse JSON
-        StaticJsonDocument<256> doc;
+        StaticJsonDocument<JSON_BUFFER_SIZE> doc;
         DeserializationError error = deserializeJson(doc, value.c_str());
 
         if (error) {
