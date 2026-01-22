@@ -1,10 +1,13 @@
 /*
  * ESP32 BLE LED Controller
- * Segna Project - Ricevitore BLE per controllo LED RGB
+ * Segna Project - Ricevitore BLE per controllo 5 LED singoli
  *
  * Hardware:
- * - LED RGB Catodo Comune: GPIO 25 (R), GPIO 26 (G), GPIO 27 (B)
- * - LED Strip WS2812B: GPIO 23 (opzionale)
+ * - LED Bianco: GPIO 25 (Lettera A)
+ * - LED Giallo: GPIO 26 (Lettera B)
+ * - LED Verde: GPIO 27 (Lettera C)
+ * - LED Rosso: GPIO 32 (Lettera D)
+ * - LED Blu: GPIO 33 (Lettera E)
  *
  * Dipendenze:
  * - ArduinoJson
@@ -21,24 +24,25 @@
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 
-// Pin GPIO per LED RGB (catodo comune)
-#define PIN_RED    25
-#define PIN_GREEN  26
-#define PIN_BLUE   27
-
-// Configurazione PWM per LED RGB
-#define PWM_FREQ     5000
-#define PWM_RES_BITS 8
-#define RED_CHANNEL   0
-#define GREEN_CHANNEL 1
-#define BLUE_CHANNEL  2
+// Pin GPIO per LED singoli
+#define LED_WHITE_PIN   25  // Lettera A - Bianco
+#define LED_YELLOW_PIN  26  // Lettera B - Giallo
+#define LED_GREEN_PIN   27  // Lettera C - Verde
+#define LED_RED_PIN     32  // Lettera D - Rosso
+#define LED_BLUE_PIN    33  // Lettera E - Blu
 
 // Dimensione buffer JSON
-#define JSON_BUFFER_SIZE 256
+#define JSON_BUFFER_SIZE 512
 
 BLEServer* pServer = NULL;
 BLECharacteristic* pCharacteristic = NULL;
 bool deviceConnected = false;
+
+// Variabili per gestione LED temporizzato
+unsigned long ledStartTime = 0;
+int ledDurationMs = 0;
+bool ledTimerActive = false;
+int currentActiveLed = -1; // -1 = nessun LED, 0-4 = LED attivo
 
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
@@ -74,7 +78,31 @@ class MyCallbacks: public BLECharacteristicCallbacks {
         // Gestione comando RESET
         if (doc.containsKey("command") && doc["command"] == "RESET") {
           Serial.println("Comando RESET ricevuto");
-          setLEDColor(0, 0, 0);
+
+          // Leggi impostazioni ESP32 dal campo settings
+          bool blinkAlert = false;
+          int blinkCount = 3;
+          int blinkDuration = 200;
+
+          if (doc.containsKey("settings") && doc["settings"].containsKey("esp32")) {
+            JsonObject esp32Settings = doc["settings"]["esp32"];
+            blinkAlert = esp32Settings["blinkAlert"] | false;
+            blinkCount = esp32Settings["blinkCount"] | 3;
+            blinkDuration = esp32Settings["blinkDuration"] | 200;
+          }
+
+          if (blinkAlert) {
+            // Lampeggia tutti i LED
+            blinkAllLeds(blinkCount, blinkDuration);
+          }
+
+          // Spegni tutti i LED
+          turnOffAllLeds();
+          ledTimerActive = false;
+          currentActiveLed = -1;
+
+          // Invia conferma
+          sendConfirmation("#000000");
           return;
         }
 
@@ -82,66 +110,155 @@ class MyCallbacks: public BLECharacteristicCallbacks {
         if (doc.containsKey("letter") && doc.containsKey("colorName")) {
           String letter = doc["letter"].as<String>();
           String colorName = doc["colorName"].as<String>();
+          String colorHex = doc["color"].as<String>();
 
           Serial.print("Lettera: ");
           Serial.print(letter);
           Serial.print(" - Colore: ");
           Serial.println(colorName);
 
-          // Imposta il colore del LED in base alla lettera
-          if (letter == "A") {
-            setLEDColor(255, 255, 255); // Bianco
-          } else if (letter == "B") {
-            setLEDColor(255, 255, 0);   // Giallo
-          } else if (letter == "C") {
-            setLEDColor(0, 255, 0);     // Verde
-          } else if (letter == "D") {
-            setLEDColor(255, 0, 0);     // Rosso
-          } else if (letter == "E") {
-            setLEDColor(0, 0, 255);     // Blu
+          // Leggi impostazioni ESP32
+          bool alwaysOn = true;
+          int duration = 3000;
+
+          if (doc.containsKey("settings") && doc["settings"].containsKey("esp32")) {
+            JsonObject esp32Settings = doc["settings"]["esp32"];
+            alwaysOn = esp32Settings["alwaysOn"] | true;
+            duration = esp32Settings["duration"] | 3000;
           }
+
+          // Spegni LED precedente
+          turnOffAllLeds();
+
+          // Accendi il LED corretto
+          int ledPin = -1;
+          int ledIndex = -1;
+          if (letter == "A") {
+            ledPin = LED_WHITE_PIN;
+            ledIndex = 0;
+          } else if (letter == "B") {
+            ledPin = LED_YELLOW_PIN;
+            ledIndex = 1;
+          } else if (letter == "C") {
+            ledPin = LED_GREEN_PIN;
+            ledIndex = 2;
+          } else if (letter == "D") {
+            ledPin = LED_RED_PIN;
+            ledIndex = 3;
+          } else if (letter == "E") {
+            ledPin = LED_BLUE_PIN;
+            ledIndex = 4;
+          }
+
+          if (ledPin != -1) {
+            digitalWrite(ledPin, HIGH);
+            currentActiveLed = ledIndex;
+            Serial.print("LED acceso su GPIO ");
+            Serial.println(ledPin);
+
+            if (!alwaysOn) {
+              // Imposta timer per spegnimento
+              ledStartTime = millis();
+              ledDurationMs = duration;
+              ledTimerActive = true;
+              Serial.print("LED si spegnerà dopo ");
+              Serial.print(duration);
+              Serial.println(" ms");
+            } else {
+              ledTimerActive = false;
+              Serial.println("LED rimane acceso fino a reset");
+            }
+          }
+
+          // Invia conferma
+          sendConfirmation(colorHex);
         }
       }
     }
 };
 
-void setLEDColor(int red, int green, int blue) {
-  // Scrivi i valori PWM per ogni canale colore
-  ledcWrite(RED_CHANNEL, red);
-  ledcWrite(GREEN_CHANNEL, green);
-  ledcWrite(BLUE_CHANNEL, blue);
+void turnOffAllLeds() {
+  digitalWrite(LED_WHITE_PIN, LOW);
+  digitalWrite(LED_YELLOW_PIN, LOW);
+  digitalWrite(LED_GREEN_PIN, LOW);
+  digitalWrite(LED_RED_PIN, LOW);
+  digitalWrite(LED_BLUE_PIN, LOW);
+  Serial.println("Tutti i LED spenti");
+}
 
-  Serial.print("LED impostato su RGB(");
-  Serial.print(red);
-  Serial.print(", ");
-  Serial.print(green);
-  Serial.print(", ");
-  Serial.print(blue);
-  Serial.println(")");
+void blinkAllLeds(int count, int duration) {
+  Serial.print("Lampeggio ");
+  Serial.print(count);
+  Serial.println(" volte");
+
+  for (int i = 0; i < count; i++) {
+    // Accendi tutti
+    digitalWrite(LED_WHITE_PIN, HIGH);
+    digitalWrite(LED_YELLOW_PIN, HIGH);
+    digitalWrite(LED_GREEN_PIN, HIGH);
+    digitalWrite(LED_RED_PIN, HIGH);
+    digitalWrite(LED_BLUE_PIN, HIGH);
+    delay(duration);
+
+    // Spegni tutti
+    turnOffAllLeds();
+    delay(duration);
+  }
+}
+
+void sendConfirmation(String colorHex) {
+  if (deviceConnected && pCharacteristic != NULL) {
+    StaticJsonDocument<128> confirmDoc;
+    confirmDoc["status"] = "received";
+    confirmDoc["device"] = "esp32";
+    confirmDoc["color"] = colorHex;
+
+    String confirmJson;
+    serializeJson(confirmDoc, confirmJson);
+
+    pCharacteristic->setValue(confirmJson.c_str());
+    pCharacteristic->notify();
+
+    Serial.print("Conferma inviata: ");
+    Serial.println(confirmJson);
+  }
 }
 
 void setup() {
   Serial.begin(115200);
   Serial.println("Avvio ESP32 BLE LED Controller...");
 
-  // Configura pin LED come output con PWM
-  ledcSetup(RED_CHANNEL, PWM_FREQ, PWM_RES_BITS);
-  ledcSetup(GREEN_CHANNEL, PWM_FREQ, PWM_RES_BITS);
-  ledcSetup(BLUE_CHANNEL, PWM_FREQ, PWM_RES_BITS);
+  // Configura pin LED come output
+  pinMode(LED_WHITE_PIN, OUTPUT);
+  pinMode(LED_YELLOW_PIN, OUTPUT);
+  pinMode(LED_GREEN_PIN, OUTPUT);
+  pinMode(LED_RED_PIN, OUTPUT);
+  pinMode(LED_BLUE_PIN, OUTPUT);
 
-  ledcAttachPin(PIN_RED, RED_CHANNEL);
-  ledcAttachPin(PIN_GREEN, GREEN_CHANNEL);
-  ledcAttachPin(PIN_BLUE, BLUE_CHANNEL);
+  // Spegni tutti i LED all'avvio
+  turnOffAllLeds();
 
   // Test LED all'avvio
   Serial.println("Test LED...");
-  setLEDColor(255, 0, 0);   // Rosso
-  delay(500);
-  setLEDColor(0, 255, 0);   // Verde
-  delay(500);
-  setLEDColor(0, 0, 255);   // Blu
-  delay(500);
-  setLEDColor(0, 0, 0);     // Spento
+  digitalWrite(LED_WHITE_PIN, HIGH);
+  delay(300);
+  digitalWrite(LED_WHITE_PIN, LOW);
+
+  digitalWrite(LED_YELLOW_PIN, HIGH);
+  delay(300);
+  digitalWrite(LED_YELLOW_PIN, LOW);
+
+  digitalWrite(LED_GREEN_PIN, HIGH);
+  delay(300);
+  digitalWrite(LED_GREEN_PIN, LOW);
+
+  digitalWrite(LED_RED_PIN, HIGH);
+  delay(300);
+  digitalWrite(LED_RED_PIN, LOW);
+
+  digitalWrite(LED_BLUE_PIN, HIGH);
+  delay(300);
+  digitalWrite(LED_BLUE_PIN, LOW);
 
   // Inizializza BLE
   BLEDevice::init("ESP32-Segna");
@@ -151,11 +268,12 @@ void setup() {
   // Crea il servizio BLE
   BLEService *pService = pServer->createService(SERVICE_UUID);
 
-  // Crea la caratteristica BLE
+  // Crea la caratteristica BLE con supporto NOTIFY
   pCharacteristic = pService->createCharacteristic(
                       CHARACTERISTIC_UUID,
                       BLECharacteristic::PROPERTY_READ |
-                      BLECharacteristic::PROPERTY_WRITE
+                      BLECharacteristic::PROPERTY_WRITE |
+                      BLECharacteristic::PROPERTY_NOTIFY
                     );
 
   pCharacteristic->setCallbacks(new MyCallbacks());
@@ -177,6 +295,14 @@ void setup() {
 }
 
 void loop() {
+  // Gestione timer LED temporizzato
+  if (ledTimerActive && (millis() - ledStartTime >= ledDurationMs)) {
+    Serial.println("Timeout LED raggiunto, spegnimento...");
+    turnOffAllLeds();
+    ledTimerActive = false;
+    currentActiveLed = -1;
+  }
+
   // Se disconnesso, mantieni advertising attivo
   if (!deviceConnected) {
     delay(500);
