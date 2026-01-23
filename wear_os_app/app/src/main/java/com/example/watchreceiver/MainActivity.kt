@@ -68,12 +68,13 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         
         // Acquire wakelock to keep app active
+        // Using timeout to prevent battery drain if app crashes
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "WatchReceiver::WakeLock"
         ).apply {
-            acquire()
+            acquire(10*60*1000L /*10 minutes*/)
         }
 
         vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
@@ -109,6 +110,12 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         loadSettings()
         // Re-add listener
         messageClient.addListener(this)
+        
+        // Re-acquire wakelock if it expired
+        if (wakeLock?.isHeld == false) {
+            wakeLock?.acquire(10*60*1000L /*10 minutes*/)
+            android.util.Log.d(TAG, "Wakelock re-acquired")
+        }
     }
 
     override fun onPause() {
@@ -124,7 +131,7 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
     }
 
     // Override back button to prevent accidental closure
-    @Deprecated("Deprecated in Java")
+    @Suppress("DEPRECATION")
     override fun onBackPressed() {
         // Do nothing - app stays open
         // Only remote command from smartphone can close it

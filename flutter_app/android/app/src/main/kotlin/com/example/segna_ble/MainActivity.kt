@@ -90,17 +90,23 @@ class MainActivity: FlutterActivity() {
     }
 
     private fun sendToAllNodes(message: String, result: MethodChannel.Result) {
+        if (connectedNodes.isEmpty()) {
+            result.error("NO_NODES", "No connected watch nodes found", null)
+            return
+        }
+        
         val data = message.toByteArray(Charsets.UTF_8)
-        var successCount = 0
-        var failureCount = 0
+        val totalNodes = connectedNodes.size
+        val successCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val failureCount = java.util.concurrent.atomic.AtomicInteger(0)
         
         for (node in connectedNodes) {
             messageClient.sendMessage(node.id, MESSAGE_PATH, data)
                 .addOnSuccessListener {
-                    successCount++
+                    val completed = successCount.incrementAndGet() + failureCount.get()
                     Log.d(TAG, "Message sent successfully to ${node.displayName}")
-                    if (successCount + failureCount == connectedNodes.size) {
-                        if (successCount > 0) {
+                    if (completed == totalNodes) {
+                        if (successCount.get() > 0) {
                             result.success(true)
                         } else {
                             result.error("SEND_ERROR", "Failed to send to any node", null)
@@ -108,10 +114,10 @@ class MainActivity: FlutterActivity() {
                     }
                 }
                 .addOnFailureListener { exception ->
-                    failureCount++
+                    val completed = successCount.get() + failureCount.incrementAndGet()
                     Log.e(TAG, "Failed to send message to ${node.displayName}", exception)
-                    if (successCount + failureCount == connectedNodes.size) {
-                        if (successCount > 0) {
+                    if (completed == totalNodes) {
+                        if (successCount.get() > 0) {
                             result.success(true)
                         } else {
                             result.error("SEND_ERROR", exception.message, null)
