@@ -1,23 +1,16 @@
 package com.example.watchreceiver
 
-import android.Manifest
 import android.app.NotificationManager
-import android.bluetooth.*
-import android.bluetooth.le.AdvertiseCallback
-import android.bluetooth.le.AdvertiseData
-import android.bluetooth.le.AdvertiseSettings
-import android.bluetooth.le.BluetoothLeAdvertiser
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Bundle
-import android.os.ParcelUuid
+import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -39,24 +32,20 @@ import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
+import com.google.android.gms.wearable.MessageClient
+import com.google.android.gms.wearable.MessageEvent
+import com.google.android.gms.wearable.Wearable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
-import java.util.*
 
-class MainActivity : ComponentActivity() {
-    private var bluetoothManager: BluetoothManager? = null
-    private var bluetoothGattServer: BluetoothGattServer? = null
-    private var bluetoothLeAdvertiser: BluetoothLeAdvertiser? = null
+class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListener {
     private var vibrator: Vibrator? = null
-    private var advertiseCallback: AdvertiseCallback? = null
     private var notificationManager: NotificationManager? = null
-
-    private val serviceUuid = UUID.fromString("4fafc201-1fb5-459e-8fcc-c5c9c331914b")
-    private val characteristicUuid = UUID.fromString("beb5483e-36e1-4688-b7f5-ea07361b26a8")
+    private var wakeLock: PowerManager.WakeLock? = null
+    private lateinit var messageClient: MessageClient
 
     private val letterState = mutableStateOf("")
     private val colorState = mutableStateOf(android.graphics.Color.BLACK)
@@ -66,32 +55,38 @@ class MainActivity : ComponentActivity() {
     private val displayModeState = mutableStateOf("BOTH")
     private val letterSizeState = mutableStateOf(120)
     private val colorSizeState = mutableStateOf("FULLSCREEN")
-    
-    // Permission launcher for Bluetooth permissions
-    private val requestBluetoothPermissions = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val allGranted = permissions.entries.all { it.value }
-        if (allGranted) {
-            // All permissions granted, setup BLE
-            setupBLE()
-        } else {
-            // Permissions denied - app will not function properly
-            android.util.Log.w("MainActivity", "Bluetooth permissions denied - BLE functionality will not work")
-        }
+
+    companion object {
+        private const val MESSAGE_PATH = "/segna_channel"
+        private const val TAG = "WatchReceiver"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Keep screen on
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        
+        // Acquire wakelock to keep app active
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "WatchReceiver::WakeLock"
+        ).apply {
+            acquire()
+        }
+
         vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         
+        // Initialize Wear OS Message Client
+        messageClient = Wearable.getMessageClient(this)
+        messageClient.addListener(this)
+        
+        android.util.Log.d(TAG, "Wear OS MessageClient initialized")
+        
         // Load settings
         loadSettings()
-        
-        // Request Bluetooth permissions before setting up BLE
-        requestBluetoothPermissionsIfNeeded()
 
         setContent {
             WatchDisplay(
@@ -112,6 +107,37 @@ class MainActivity : ComponentActivity() {
         notificationManager?.cancelAll()
         // Reload settings in case they changed
         loadSettings()
+        // Re-add listener
+        messageClient.addListener(this)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Remove listener to avoid leaks
+        messageClient.removeListener(this)
+    }
+
+    override fun onDestroy() {
+        wakeLock?.release()
+        messageClient.removeListener(this)
+        super.onDestroy()
+    }
+
+    // Override back button to prevent accidental closure
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        // Do nothing - app stays open
+        // Only remote command from smartphone can close it
+        android.util.Log.d(TAG, "Back button pressed - ignoring to keep app active")
+    }
+
+    // Wear OS Message Listener
+    override fun onMessageReceived(messageEvent: MessageEvent) {
+        if (messageEvent.path == MESSAGE_PATH) {
+            val message = String(messageEvent.data, Charsets.UTF_8)
+            android.util.Log.d(TAG, "Received message: $message")
+            handleCommand(message)
+        }
     }
 
     private fun loadSettings() {
@@ -126,116 +152,17 @@ class MainActivity : ComponentActivity() {
         startActivity(intent)
     }
     
-    private fun requestBluetoothPermissionsIfNeeded() {
-        // Android 12+ (API 31+) requires runtime permissions
-        val permissions = arrayOf(
-            Manifest.permission.BLUETOOTH_CONNECT,
-            Manifest.permission.BLUETOOTH_ADVERTISE,
-            Manifest.permission.BLUETOOTH_SCAN
-        )
-        
-        val missingPermissions = permissions.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-        }
-        
-        if (missingPermissions.isNotEmpty()) {
-            requestBluetoothPermissions.launch(missingPermissions.toTypedArray())
-        } else {
-            // Permissions already granted
-            setupBLE()
-        }
-    }
-    
-    private fun hasBluetoothPermissions(): Boolean {
-        return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
-               ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED &&
-               ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
-    }
-
-    private fun setupBLE() {
-        if (!hasBluetoothPermissions()) {
-            return
-        }
-        
-        bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        val bluetoothAdapter = bluetoothManager?.adapter
-
-        bluetoothLeAdvertiser = bluetoothAdapter?.bluetoothLeAdvertiser
-
-        val gattServerCallback = object : BluetoothGattServerCallback() {
-            override fun onCharacteristicWriteRequest(
-                device: BluetoothDevice?,
-                requestId: Int,
-                characteristic: BluetoothGattCharacteristic?,
-                preparedWrite: Boolean,
-                responseNeeded: Boolean,
-                offset: Int,
-                value: ByteArray?
-            ) {
-                if (characteristic?.uuid == characteristicUuid && value != null) {
-                    handleCommand(String(value))
-                }
-
-                if (responseNeeded && hasBluetoothPermissions()) {
-                    bluetoothGattServer?.sendResponse(
-                        device,
-                        requestId,
-                        BluetoothGatt.GATT_SUCCESS,
-                        0,
-                        null
-                    )
-                }
-            }
-        }
-
-        bluetoothGattServer = bluetoothManager?.openGattServer(this, gattServerCallback)
-
-        val service = BluetoothGattService(serviceUuid, BluetoothGattService.SERVICE_TYPE_PRIMARY)
-        val characteristic = BluetoothGattCharacteristic(
-            characteristicUuid,
-            BluetoothGattCharacteristic.PROPERTY_WRITE or
-            BluetoothGattCharacteristic.PROPERTY_NOTIFY,
-            BluetoothGattCharacteristic.PERMISSION_WRITE
-        )
-        service.addCharacteristic(characteristic)
-        bluetoothGattServer?.addService(service)
-
-        startAdvertising()
-    }
-
-    private fun startAdvertising() {
-        if (!hasBluetoothPermissions()) {
-            return
-        }
-        
-        val settings = AdvertiseSettings.Builder()
-            .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
-            .setConnectable(true)
-            .setTimeout(0)
-            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
-            .build()
-
-        val data = AdvertiseData.Builder()
-            .setIncludeDeviceName(true)
-            .addServiceUuid(ParcelUuid(serviceUuid))
-            .build()
-
-        advertiseCallback = object : AdvertiseCallback() {
-            override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
-                super.onStartSuccess(settingsInEffect)
-            }
-
-            override fun onStartFailure(errorCode: Int) {
-                super.onStartFailure(errorCode)
-            }
-        }
-        
-        bluetoothLeAdvertiser?.startAdvertising(settings, data, advertiseCallback)
-    }
-
     private fun handleCommand(json: String) {
         try {
             val jsonObject = JSONObject(json)
+
+            // Handle close app command
+            if (jsonObject.optBoolean("closeApp", false)) {
+                android.util.Log.d(TAG, "Received closeApp command")
+                wakeLock?.release()
+                finishAndRemoveTask()
+                return
+            }
 
             if (jsonObject.has("command") && jsonObject.getString("command") == "RESET") {
                 // Gestione comando RESET
@@ -259,9 +186,6 @@ class MainActivity : ComponentActivity() {
                 letterState.value = ""
                 colorState.value = android.graphics.Color.BLACK
                 isVibrationMode.value = false
-
-                // Invia conferma ricezione
-                sendConfirmation("#000000")
 
             } else if (jsonObject.has("letter")) {
                 val letter = jsonObject.getString("letter")
@@ -318,49 +242,9 @@ class MainActivity : ComponentActivity() {
                     letterState.value = letter
                     colorState.value = color
                 }
-
-                // Invia conferma ricezione
-                sendConfirmation(colorHex)
             }
         } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    private fun sendConfirmation(color: String) {
-        if (!hasBluetoothPermissions()) {
-            return
-        }
-        
-        try {
-            val confirmationJson = JSONObject()
-            confirmationJson.put("status", "received")
-            confirmationJson.put("device", "watch")
-            confirmationJson.put("color", color)
-            val confirmationBytes = confirmationJson.toString().toByteArray()
-
-            // Invia notifica a tutti i dispositivi connessi
-            bluetoothGattServer?.getService(serviceUuid)
-                ?.getCharacteristic(characteristicUuid)?.let { characteristic ->
-                    characteristic.value = confirmationBytes
-                    bluetoothGattServer?.notifyCharacteristicChanged(
-                        null,
-                        characteristic,
-                        false
-                    )
-                }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        if (hasBluetoothPermissions()) {
-            bluetoothGattServer?.close()
-            advertiseCallback?.let { callback ->
-                bluetoothLeAdvertiser?.stopAdvertising(callback)
-            }
+            android.util.Log.e(TAG, "Error parsing message", e)
         }
     }
 }
