@@ -41,6 +41,7 @@ class MainActivity : ComponentActivity() {
     private var bluetoothGattServer: BluetoothGattServer? = null
     private var bluetoothLeAdvertiser: BluetoothLeAdvertiser? = null
     private var vibrator: Vibrator? = null
+    private var advertiseCallback: AdvertiseCallback? = null
 
     private val serviceUuid = UUID.fromString("4fafc201-1fb5-459e-8fcc-c5c9c331914b")
     private val characteristicUuid = UUID.fromString("beb5483e-36e1-4688-b7f5-ea07361b26a8")
@@ -58,8 +59,8 @@ class MainActivity : ComponentActivity() {
             // All permissions granted, setup BLE
             setupBLE()
         } else {
-            // Permissions denied - log or show message
-            // For now, we'll just try to setup anyway (will fail gracefully)
+            // Permissions denied - app will not function properly
+            android.util.Log.w("MainActivity", "Bluetooth permissions denied - BLE functionality will not work")
         }
     }
 
@@ -182,7 +183,7 @@ class MainActivity : ComponentActivity() {
             .addServiceUuid(ParcelUuid(serviceUuid))
             .build()
 
-        bluetoothLeAdvertiser?.startAdvertising(settings, data, object : AdvertiseCallback() {
+        advertiseCallback = object : AdvertiseCallback() {
             override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
                 super.onStartSuccess(settingsInEffect)
             }
@@ -190,7 +191,9 @@ class MainActivity : ComponentActivity() {
             override fun onStartFailure(errorCode: Int) {
                 super.onStartFailure(errorCode)
             }
-        })
+        }
+        
+        bluetoothLeAdvertiser?.startAdvertising(settings, data, advertiseCallback)
     }
 
     private fun handleCommand(json: String) {
@@ -318,7 +321,9 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         if (hasBluetoothPermissions()) {
             bluetoothGattServer?.close()
-            bluetoothLeAdvertiser?.stopAdvertising(null)
+            advertiseCallback?.let { callback ->
+                bluetoothLeAdvertiser?.stopAdvertising(callback)
+            }
         }
     }
 }
