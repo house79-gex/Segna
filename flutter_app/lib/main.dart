@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'models/settings_model.dart';
@@ -15,28 +16,30 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Segna BLE Controller',
+      title: 'Segna Controller',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
       ),
-      home: const BLEControllerPage(),
+      home: const ControllerPage(),
     );
   }
 }
 
-class BLEControllerPage extends StatefulWidget {
-  const BLEControllerPage({super.key});
+class ControllerPage extends StatefulWidget {
+  const ControllerPage({super.key});
 
   @override
-  State<BLEControllerPage> createState() => _BLEControllerPageState();
+  State<ControllerPage> createState() => _ControllerPageState();
 }
 
-class _BLEControllerPageState extends State<BLEControllerPage> {
+class _ControllerPageState extends State<ControllerPage> {
+  // Platform channel for Wear OS communication
+  static const platform = MethodChannel('com.example.segna/wear');
+  
+  // ESP32 BLE variables
   BluetoothDevice? espDevice;
-  BluetoothDevice? watchDevice;
   BluetoothCharacteristic? espCharacteristic;
-  BluetoothCharacteristic? watchCharacteristic;
 
   bool isScanning = false;
   bool espConnected = false;
@@ -44,7 +47,6 @@ class _BLEControllerPageState extends State<BLEControllerPage> {
 
   // Conferme ricezione dai dispositivi
   String? espLastConfirmedColor;
-  String? watchLastConfirmedColor;
 
   // Impostazioni
   SettingsModel? settings;
@@ -65,6 +67,7 @@ class _BLEControllerPageState extends State<BLEControllerPage> {
     super.initState();
     _requestPermissions();
     _loadSettings();
+    _connectToWatch();
   }
 
   Future<void> _requestPermissions() async {
@@ -92,12 +95,34 @@ class _BLEControllerPageState extends State<BLEControllerPage> {
     }
   }
 
+  // Connect to Wear OS watch via platform channel
+  Future<void> _connectToWatch() async {
+    try {
+      final result = await platform.invokeMethod('connectToWatch');
+      setState(() {
+        watchConnected = result == true;
+      });
+      if (watchConnected) {
+        _showMessage('Watch connesso via Wear OS');
+      }
+    } catch (e) {
+      print('Error connecting to watch: $e');
+      setState(() {
+        watchConnected = false;
+      });
+    }
+  }
+
   Future<void> _scanForDevices() async {
     setState(() {
       isScanning = true;
     });
 
+    // Connect to watch first
+    await _connectToWatch();
+
     try {
+      // Scan for ESP32 only via BLE
       await FlutterBluePlus.startScan(timeout: const Duration(seconds: 4));
 
       FlutterBluePlus.scanResults.listen((results) {
@@ -107,12 +132,6 @@ class _BLEControllerPageState extends State<BLEControllerPage> {
                   result.device.platformName.contains('Segna'))) {
             espDevice = result.device;
             _connectToESP32();
-          }
-          if (watchDevice == null &&
-              (result.device.platformName.contains('Galaxy Watch') ||
-                  result.device.platformName.contains('Watch'))) {
-            watchDevice = result.device;
-            _connectToWatch();
           }
         }
         setState(() {});
@@ -163,40 +182,6 @@ class _BLEControllerPageState extends State<BLEControllerPage> {
     }
   }
 
-  Future<void> _connectToWatch() async {
-    if (watchDevice == null) return;
-
-    try {
-      await watchDevice!.connect();
-      List<BluetoothService> services = await watchDevice!.discoverServices();
-
-      for (var service in services) {
-        if (service.uuid.toString().toLowerCase() ==
-            espServiceUuid.toLowerCase()) {
-          for (var characteristic in service.characteristics) {
-            if (characteristic.uuid.toString().toLowerCase() ==
-                espCharacteristicUuid.toLowerCase()) {
-              watchCharacteristic = characteristic;
-              // Abilita notifiche per ricevere conferme
-              if (characteristic.properties.notify) {
-                await characteristic.setNotifyValue(true);
-                characteristic.value.listen((value) {
-                  _handleDeviceNotification('watch', value);
-                });
-              }
-            }
-          }
-        }
-      }
-
-      setState(() {
-        watchConnected = true;
-      });
-    } catch (e) {
-      _showError('Errore connessione Watch: $e');
-    }
-  }
-
   void _handleDeviceNotification(String deviceType, List<int> value) {
     try {
       final jsonString = String.fromCharCodes(value);
@@ -205,8 +190,6 @@ class _BLEControllerPageState extends State<BLEControllerPage> {
         setState(() {
           if (deviceType == 'esp32') {
             espLastConfirmedColor = data['color'];
-          } else if (deviceType == 'watch') {
-            watchLastConfirmedColor = data['color'];
           }
         });
       }
@@ -226,12 +209,11 @@ class _BLEControllerPageState extends State<BLEControllerPage> {
       'settings': settings!.toJson(),
     });
 
-    await _sendToDevice(payload);
+    await _sendToDevices(payload);
 
     // Reset conferme precedenti quando si invia un nuovo comando
     setState(() {
       espLastConfirmedColor = null;
-      watchLastConfirmedColor = null;
     });
   }
 
@@ -242,32 +224,41 @@ class _BLEControllerPageState extends State<BLEControllerPage> {
       'command': 'RESET',
       'settings': settings!.toResetJson(),
     });
-    await _sendToDevice(payload);
+    await _sendToDevices(payload);
 
     // Reset conferme
     setState(() {
       espLastConfirmedColor = null;
-      watchLastConfirmedColor = null;
     });
   }
 
-  Future<void> _sendToDevice(String payload) async {
-    final bytes = utf8.encode(payload);
-
+  Future<void> _sendToDevices(String payload) async {
+    // Send to ESP32 via BLE
     if (espCharacteristic != null) {
       try {
+        final bytes = utf8.encode(payload);
         await espCharacteristic!.write(bytes);
       } catch (e) {
         _showError('Errore invio ESP32: $e');
       }
     }
 
-    if (watchCharacteristic != null) {
+    // Send to watch via Wear OS platform channel
+    if (watchConnected) {
       try {
-        await watchCharacteristic!.write(bytes);
+        await platform.invokeMethod('sendMessage', {'message': payload});
       } catch (e) {
         _showError('Errore invio Watch: $e');
       }
+    }
+  }
+
+  Future<void> _closeWatchApp() async {
+    try {
+      await platform.invokeMethod('closeWatchApp');
+      _showMessage('Comando chiusura inviato al watch');
+    } catch (e) {
+      _showError('Errore chiusura watch: $e');
     }
   }
 
@@ -277,12 +268,18 @@ class _BLEControllerPageState extends State<BLEControllerPage> {
     );
   }
 
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: const Text('Segna BLE'),
+        title: const Text('Segna Controller'),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),
@@ -300,7 +297,7 @@ class _BLEControllerPageState extends State<BLEControllerPage> {
                 icon: Icon(isScanning
                     ? Icons.hourglass_empty
                     : Icons.bluetooth_searching),
-                label: Text(isScanning ? 'Scansione...' : 'Connetti'),
+                label: Text(isScanning ? 'Scansione...' : 'Connetti Dispositivi'),
                 onPressed: isScanning ? null : _scanForDevices,
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
@@ -342,9 +339,7 @@ class _BLEControllerPageState extends State<BLEControllerPage> {
                   Container(
                     decoration: BoxDecoration(
                       border: Border.all(
-                        color: watchLastConfirmedColor != null
-                            ? _getColorFromHex(watchLastConfirmedColor!)
-                            : Colors.transparent,
+                        color: Colors.transparent,
                         width: 3,
                       ),
                       borderRadius: BorderRadius.circular(8),
@@ -358,7 +353,7 @@ class _BLEControllerPageState extends State<BLEControllerPage> {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          'Watch',
+                          'Watch (Wear OS)',
                           style: TextStyle(
                             color: watchConnected ? Colors.green : Colors.grey,
                           ),
@@ -368,7 +363,18 @@ class _BLEControllerPageState extends State<BLEControllerPage> {
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 8),
+              // Close Watch App button
+              if (watchConnected)
+                TextButton.icon(
+                  icon: const Icon(Icons.close, size: 16),
+                  label: const Text('Chiudi App Watch'),
+                  onPressed: _closeWatchApp,
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.red,
+                  ),
+                ),
+              const SizedBox(height: 8),
               // Pulsanti lettere in colonna centrale
               Expanded(
                 child: SingleChildScrollView(
@@ -446,7 +452,6 @@ class _BLEControllerPageState extends State<BLEControllerPage> {
   @override
   void dispose() {
     espDevice?.disconnect();
-    watchDevice?.disconnect();
     super.dispose();
   }
 }

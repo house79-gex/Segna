@@ -1,18 +1,73 @@
-# Segna - Sistema di Comunicazione BLE Multi-Dispositivo
+# Segna - Sistema di Comunicazione Multi-Dispositivo
 
-Sistema professionale di comunicazione in tempo reale tra smartphone, smartwatch e ESP32 tramite Bluetooth Low Energy (BLE).
+Sistema professionale di comunicazione in tempo reale tra smartphone, smartwatch e ESP32.
 
-## 🆕 Aggiornamento Versione 2.0
+## 🆕 Aggiornamento Versione 3.0 - Wear OS Data Layer
 
-### Nuove Funzionalità Principali
+### 🎯 Risoluzione Conflitti Samsung Wearable
 
-#### 🎨 Nuove Icone App
-- Design moderno con orologio stilizzato e freccia/segnale
-- Colori Material Design: Blu (#2196F3) e bianco
-- Icone ottimizzate per tutte le densità di schermo
+**PROBLEMA RISOLTO**: L'app ora utilizza **Wear OS Data Layer API** invece di BLE diretto per la comunicazione con il watch, eliminando completamente i conflitti con Samsung Wearable.
 
-#### ⚙️ Menu Configurazioni Watch
-L'app smartwatch ora include un menu completo di configurazioni accessibile tramite il pulsante impostazioni in alto a destra:
+#### ✅ Vantaggi della Nuova Architettura
+- **Nessun conflitto Bluetooth**: Usa la connessione Wear OS esistente
+- **Watch sempre attivo**: Wakelock mantiene l'app in esecuzione
+- **Chiusura remota**: Controllo completo dell'app watch dallo smartphone
+- **Più affidabile**: API ufficiali Google invece di BLE custom
+- **Compatibilità totale**: Funziona con tutti i device Wear OS
+
+### 🏗️ Nuova Architettura
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    SMARTPHONE (Flutter)                      │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │  UI: 5 Pulsanti + RESET + Chiudi App Watch           │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                          │                                   │
+│              ┌───────────┴───────────┐                      │
+│              │                       │                       │
+│      Wear OS Message API        BLE Direct                  │
+│     (Platform Channel)       (flutter_blue_plus)            │
+└──────────────┼───────────────────────┼──────────────────────┘
+               │                       │
+      ┌────────▼─────────┐    ┌───────▼────────┐
+      │   SMARTWATCH     │    │      ESP32      │
+      │   (Wear OS)      │    │  (BLE Server)   │
+      ├──────────────────┤    ├─────────────────┤
+      │ MessageClient    │    │ 5 LED Singoli   │
+      │ + Wakelock       │    │ GPIO 25-33      │
+      │ + No Back Button │    │                 │
+      └──────────────────┘    └─────────────────┘
+
+Wear OS: Message API via /segna_channel
+ESP32: BLE UUID 4fafc201-1fb5-459e-8fcc-c5c9c331914b
+```
+
+### 🆕 Nuove Funzionalità Principali
+
+#### 📱 Smartphone App
+- **Pulsante "Chiudi App Watch"**: Chiude l'app watch da remoto
+- **Connessione automatica**: Si connette al watch via Wear OS all'avvio
+- **Indicatore Wear OS**: Mostra "Watch (Wear OS)" invece di "Watch"
+- **Approccio ibrido**: Wear OS per watch, BLE per ESP32
+
+#### ⌚ Watch App  
+- **App sempre attiva**: Wakelock impedisce la chiusura automatica
+- **Back button disabilitato**: Previene chiusura accidentale
+- **Chiusura remota**: Solo lo smartphone può chiudere l'app
+- **Nessun BLE**: Comunicazione tramite Wear OS Message API
+
+#### 📡 Comunicazione
+- **Wear OS Message API**: Comunicazione watch ↔ smartphone
+- **BLE per ESP32**: Invariato, funziona come prima
+- **Nessun conflitto**: Samsung Wearable può rimanere sempre connesso
+
+---
+
+## 🎨 Versione 2.0 - Funzionalità Precedenti
+
+### ⚙️ Menu Configurazioni Watch
+L'app smartwatch include un menu completo di configurazioni:
 
 **Modalità Visualizzazione:**
 - **Lettera e Colore** (default): Mostra sia la lettera che il colore di sfondo
@@ -30,78 +85,42 @@ L'app smartwatch ora include un menu completo di configurazioni accessibile tram
 - **Cerchio Medio**: Cerchio colorato da 200dp
 - **Cerchio Piccolo**: Punto colorato da 100dp
 
-Le impostazioni vengono salvate e persistono dopo il riavvio dell'app.
-
-#### 🔐 Build Firmato per Produzione
+### 🔐 Build Firmato per Produzione
 - Keystore di produzione configurato automaticamente
 - APK firmato pronto per installazione su qualsiasi dispositivo
 - Firma automatica per build debug e release
-
-#### 🔕 Gestione Notifiche
-- Le notifiche vengono automaticamente cancellate quando l'app è in foreground
-- Esperienza utente migliorata senza distrazioni
-
-#### 📡 Supporto Samsung Accessory Protocol (SAP)
-Per evitare conflitti con Samsung Wearable, l'app supporta l'integrazione con Samsung Accessory Protocol. Consulta `SAP_INTEGRATION_GUIDE.md` per i dettagli.
 
 ---
 
 ## 📋 Descrizione
 
-Segna è un'applicazione distribuita che permette il controllo sincronizzato di dispositivi multipli tramite BLE. Il sistema è composto da:
+Segna è un'applicazione distribuita che permette il controllo sincronizzato di dispositivi multipli. Il sistema è composto da:
 
-- **App Smartphone (Flutter)**: Interfaccia di controllo principale con 5 pulsanti colorati, impostazioni configurabili e feedback visivo
-- **App Smartwatch (Wear OS)**: Display visuale o modalità vibrazione per notifiche discrete
+- **App Smartphone (Flutter)**: Interfaccia di controllo principale con 5 pulsanti colorati, impostazioni configurabili e chiusura remota watch
+- **App Smartwatch (Wear OS)**: Display visuale o modalità vibrazione, sempre attiva con wakelock
 - **Firmware ESP32**: Controllore hardware per 5 LED singoli separati
 
-### ✨ Nuove Funzionalità
+### ✨ Funzionalità Complete
 
 #### Smartphone
-- Nuovo layout UI con pulsanti in colonna centrale verticale
+- Layout UI con pulsanti in colonna centrale verticale
 - Pulsante Reset compatto in basso a destra
+- **Pulsante "Chiudi App Watch"** per chiusura remota
 - Schermata impostazioni completa per configurare Watch e ESP32
-- Feedback visivo con bordo colorato quando i dispositivi confermano la ricezione
-- Connessione automatica ai dispositivi durante la scansione
+- Connessione automatica tramite Wear OS e scansione BLE
 
 #### Smartwatch
 - Modalità vibrazione: schermo nero con vibrazioni (1-5 volte in base alla lettera)
 - Modalità display: lettera a schermo intero con colore di sfondo
-- Vibrazione prolungata per reset
-- Invio conferme BLE allo smartphone
+- **App sempre attiva**: Wakelock + back button disabilitato
+- **Chiusura solo da smartphone**: Massimo controllo
+- Comunicazione tramite Wear OS Message API
 
 #### ESP32
 - 5 LED singoli separati (uno per colore) invece di LED RGB
 - LED sempre acceso o temporizzato (configurabile)
-- Funzione lampeggio di tutti i LED per reset/avviso
+- Funzione lampeggio di tutti i LED per reset/avvio
 - Invio conferme BLE allo smartphone
-
-## 🏗️ Architettura del Sistema
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    SMARTPHONE (Flutter)                      │
-│  ┌────────────────────────────────────────────────────────┐    │
-│  │  UI: 5 Pulsanti (A, B, C, D, E) + RESET           │    │
-│  │  Colori: Bianco, Giallo, Verde, Rosso, Blu        │    │
-│  └────────────────────────────────────────────────────┘    │
-│                          │                                   │
-│                    BLE Connection                            │
-│                          │                                   │
-└───────────┬──────────────┴──────────────┬──────────────────┘
-            │                              │
-   ┌────────▼─────────┐          ┌────────▼─────────┐
-   │   SMARTWATCH     │          │      ESP32        │
-   │   (Wear OS)      │          │  (BLE Server)     │
-   ├──────────────────┤          ├───────────────────┤
-   │ Display Lettera  │          │ 5 LED Singoli     │
-   │ + Colore Sfondo  │          │ GPIO 25,26,27     │
-   │ O Vibrazione     │          │ GPIO 32,33        │
-   └──────────────────┘          └───────────────────┘
-
-Protocollo: JSON via BLE
-Service UUID: 4fafc201-1fb5-459e-8fcc-c5c9c331914b
-Characteristic UUID: beb5483e-36e1-4688-b7f5-ea07361b26a8
-```
 
 ## 🎨 Mappatura Colori
 
@@ -121,24 +140,38 @@ Segna/
 ├── flutter_app/
 │   ├── pubspec.yaml                    # Dipendenze Flutter
 │   ├── lib/
-│   │   ├── main.dart                   # App principale smartphone
+│   │   ├── main.dart                   # App principale smartphone (Wear OS + BLE)
 │   │   ├── settings_page.dart          # Schermata impostazioni
 │   │   └── models/
 │   │       └── settings_model.dart     # Modello dati impostazioni
 │   └── android/
 │       └── app/
+│           ├── build.gradle            # Dipendenza Wear OS
 │           └── src/
 │               └── main/
-│                   └── AndroidManifest.xml  # Permessi BLE
+│                   ├── kotlin/         # Platform channel Wear OS
+│                   └── AndroidManifest.xml
 ├── wear_os_app/
 │   └── app/
 │       └── src/
 │           └── main/
+│               ├── AndroidManifest.xml  # Permessi wakelock
 │               └── java/
 │                   └── com/
 │                       └── example/
 │                           └── watchreceiver/
-│                               └── MainActivity.kt  # App smartwatch
+│                               └── MainActivity.kt  # App smartwatch (Wear OS Message API)
+├── esp32_firmware/
+│   └── esp32_led_controller.ino        # Firmware ESP32 (invariato)
+├── WEAR_OS_MIGRATION_GUIDE.md          # 📖 Guida completa migrazione Wear OS
+├── SAP_INTEGRATION_GUIDE.md            # Guida SAP (legacy)
+└── README.md                            # Questo file
+```
+
+## 📖 Documentazione
+
+- **[WEAR_OS_MIGRATION_GUIDE.md](./WEAR_OS_MIGRATION_GUIDE.md)** - Guida completa alla migrazione da BLE a Wear OS Data Layer, troubleshooting e best practices
+- **[SAP_INTEGRATION_GUIDE.md](./SAP_INTEGRATION_GUIDE.md)** - Documentazione legacy su Samsung Accessory Protocol (non necessario con Wear OS)
 ├── esp32_firmware/
 │   └── esp32_led_controller.ino        # Firmware ESP32
 └── README.md                            # Questo file
