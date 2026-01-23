@@ -1,11 +1,13 @@
 package com.example.watchreceiver
 
+import android.Manifest
 import android.bluetooth.*
 import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
 import android.bluetooth.le.BluetoothLeAdvertiser
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Bundle
 import android.os.ParcelUuid
@@ -13,6 +15,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -36,6 +40,7 @@ class MainActivity : ComponentActivity() {
     private var bluetoothGattServer: BluetoothGattServer? = null
     private var bluetoothLeAdvertiser: BluetoothLeAdvertiser? = null
     private var vibrator: Vibrator? = null
+    private var advertiseCallback: AdvertiseCallback? = null
 
     private val serviceUuid = UUID.fromString("4fafc201-1fb5-459e-8fcc-c5c9c331914b")
     private val characteristicUuid = UUID.fromString("beb5483e-36e1-4688-b7f5-ea07361b26a8")
@@ -43,12 +48,28 @@ class MainActivity : ComponentActivity() {
     private val letterState = mutableStateOf("")
     private val colorState = mutableStateOf(android.graphics.Color.BLACK)
     private val isVibrationMode = mutableStateOf(false)
+    
+    // Permission launcher for Bluetooth permissions
+    private val requestBluetoothPermissions = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val allGranted = permissions.entries.all { it.value }
+        if (allGranted) {
+            // All permissions granted, setup BLE
+            setupBLE()
+        } else {
+            // Permissions denied - app will not function properly
+            android.util.Log.w("MainActivity", "Bluetooth permissions denied - BLE functionality will not work")
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-        setupBLE()
+        
+        // Request Bluetooth permissions before setting up BLE
+        requestBluetoothPermissionsIfNeeded()
 
         setContent {
             WatchDisplay(
@@ -58,8 +79,38 @@ class MainActivity : ComponentActivity() {
             )
         }
     }
+    
+    private fun requestBluetoothPermissionsIfNeeded() {
+        // Android 12+ (API 31+) requires runtime permissions
+        val permissions = arrayOf(
+            Manifest.permission.BLUETOOTH_CONNECT,
+            Manifest.permission.BLUETOOTH_ADVERTISE,
+            Manifest.permission.BLUETOOTH_SCAN
+        )
+        
+        val missingPermissions = permissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        
+        if (missingPermissions.isNotEmpty()) {
+            requestBluetoothPermissions.launch(missingPermissions.toTypedArray())
+        } else {
+            // Permissions already granted
+            setupBLE()
+        }
+    }
+    
+    private fun hasBluetoothPermissions(): Boolean {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
+               ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED &&
+               ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+    }
 
     private fun setupBLE() {
+        if (!hasBluetoothPermissions()) {
+            return
+        }
+        
         bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         val bluetoothAdapter = bluetoothManager?.adapter
 
@@ -79,7 +130,7 @@ class MainActivity : ComponentActivity() {
                     handleCommand(String(value))
                 }
 
-                if (responseNeeded) {
+                if (responseNeeded && hasBluetoothPermissions()) {
                     bluetoothGattServer?.sendResponse(
                         device,
                         requestId,
@@ -107,6 +158,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startAdvertising() {
+        if (!hasBluetoothPermissions()) {
+            return
+        }
+        
         val settings = AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
             .setConnectable(true)
@@ -119,7 +174,7 @@ class MainActivity : ComponentActivity() {
             .addServiceUuid(ParcelUuid(serviceUuid))
             .build()
 
-        bluetoothLeAdvertiser?.startAdvertising(settings, data, object : AdvertiseCallback() {
+        advertiseCallback = object : AdvertiseCallback() {
             override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
                 super.onStartSuccess(settingsInEffect)
             }
@@ -127,7 +182,9 @@ class MainActivity : ComponentActivity() {
             override fun onStartFailure(errorCode: Int) {
                 super.onStartFailure(errorCode)
             }
-        })
+        }
+        
+        bluetoothLeAdvertiser?.startAdvertising(settings, data, advertiseCallback)
     }
 
     private fun handleCommand(json: String) {
@@ -225,6 +282,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun sendConfirmation(color: String) {
+        if (!hasBluetoothPermissions()) {
+            return
+        }
+        
         try {
             val confirmationJson = JSONObject()
             confirmationJson.put("status", "received")
@@ -249,8 +310,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        bluetoothGattServer?.close()
-        bluetoothLeAdvertiser?.stopAdvertising(null)
+        if (hasBluetoothPermissions()) {
+            bluetoothGattServer?.close()
+            advertiseCallback?.let { callback ->
+                bluetoothLeAdvertiser?.stopAdvertising(callback)
+            }
+        }
     }
 }
 
