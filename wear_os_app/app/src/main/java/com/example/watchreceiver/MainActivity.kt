@@ -1,12 +1,14 @@
 package com.example.watchreceiver
 
 import android.Manifest
+import android.app.NotificationManager
 import android.bluetooth.*
 import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
 import android.bluetooth.le.BluetoothLeAdvertiser
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Bundle
@@ -17,15 +19,25 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
@@ -41,6 +53,7 @@ class MainActivity : ComponentActivity() {
     private var bluetoothLeAdvertiser: BluetoothLeAdvertiser? = null
     private var vibrator: Vibrator? = null
     private var advertiseCallback: AdvertiseCallback? = null
+    private var notificationManager: NotificationManager? = null
 
     private val serviceUuid = UUID.fromString("4fafc201-1fb5-459e-8fcc-c5c9c331914b")
     private val characteristicUuid = UUID.fromString("beb5483e-36e1-4688-b7f5-ea07361b26a8")
@@ -48,6 +61,11 @@ class MainActivity : ComponentActivity() {
     private val letterState = mutableStateOf("")
     private val colorState = mutableStateOf(android.graphics.Color.BLACK)
     private val isVibrationMode = mutableStateOf(false)
+    
+    // Settings
+    private val displayModeState = mutableStateOf("BOTH")
+    private val letterSizeState = mutableStateOf(120)
+    private val colorSizeState = mutableStateOf("FULLSCREEN")
     
     // Permission launcher for Bluetooth permissions
     private val requestBluetoothPermissions = registerForActivityResult(
@@ -67,6 +85,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        
+        // Load settings
+        loadSettings()
         
         // Request Bluetooth permissions before setting up BLE
         requestBluetoothPermissionsIfNeeded()
@@ -75,9 +97,33 @@ class MainActivity : ComponentActivity() {
             WatchDisplay(
                 letter = letterState.value,
                 androidColor = colorState.value,
-                isVibrationMode = isVibrationMode.value
+                isVibrationMode = isVibrationMode.value,
+                displayMode = displayModeState.value,
+                letterSize = letterSizeState.value,
+                colorSize = colorSizeState.value,
+                onSettingsClick = { openSettings() }
             )
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Cancel all notifications when app is in foreground
+        notificationManager?.cancelAll()
+        // Reload settings in case they changed
+        loadSettings()
+    }
+
+    private fun loadSettings() {
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        displayModeState.value = prefs.getString("display_mode", "BOTH") ?: "BOTH"
+        letterSizeState.value = prefs.getInt("letter_size", 120)
+        colorSizeState.value = prefs.getString("color_size", "FULLSCREEN") ?: "FULLSCREEN"
+    }
+
+    private fun openSettings() {
+        val intent = Intent(this, SettingsActivity::class.java)
+        startActivity(intent)
     }
     
     private fun requestBluetoothPermissionsIfNeeded() {
@@ -267,7 +313,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 } else {
-                    // Modalità display: lettera e colore a schermo intero
+                    // Modalità display: lettera e colore
                     isVibrationMode.value = false
                     letterState.value = letter
                     colorState.value = color
@@ -320,28 +366,69 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun WatchDisplay(letter: String, androidColor: Int, isVibrationMode: Boolean) {
-    val composeColor = if (isVibrationMode) {
+fun WatchDisplay(
+    letter: String,
+    androidColor: Int,
+    isVibrationMode: Boolean,
+    displayMode: String,
+    letterSize: Int,
+    colorSize: String,
+    onSettingsClick: () -> Unit
+) {
+    // Determine what to show based on display mode
+    val showLetter = !isVibrationMode && letter.isNotEmpty() && 
+                     (displayMode == "BOTH" || displayMode == "LETTER_ONLY")
+    val showColor = !isVibrationMode && (displayMode == "BOTH" || displayMode == "COLOR_ONLY")
+
+    val backgroundColor = if (isVibrationMode) {
         ComposeColor.Black
-    } else {
+    } else if (displayMode == "LETTER_ONLY") {
+        ComposeColor.Black
+    } else if (showColor) {
         ComposeColor(
             red = android.graphics.Color.red(androidColor) / 255f,
             green = android.graphics.Color.green(androidColor) / 255f,
             blue = android.graphics.Color.blue(androidColor) / 255f,
             alpha = 1f
         )
+    } else {
+        ComposeColor.Black
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(composeColor),
+            .background(
+                if (colorSize == "FULLSCREEN" || displayMode == "LETTER_ONLY" || isVibrationMode) {
+                    backgroundColor
+                } else {
+                    ComposeColor.Black
+                }
+            ),
         contentAlignment = Alignment.Center
     ) {
-        if (!isVibrationMode && letter.isNotEmpty()) {
+        // Show colored circle if not fullscreen
+        if (showColor && colorSize != "FULLSCREEN") {
+            val radius = when (colorSize) {
+                "CIRCLE_LARGE" -> 150.dp
+                "CIRCLE_MEDIUM" -> 100.dp
+                "CIRCLE_SMALL" -> 50.dp
+                else -> 100.dp
+            }
+            
+            Box(
+                modifier = Modifier
+                    .size(radius * 2)
+                    .clip(CircleShape)
+                    .background(backgroundColor)
+            )
+        }
+
+        // Show letter if needed
+        if (showLetter) {
             Text(
                 text = letter,
-                fontSize = 120.sp,
+                fontSize = letterSize.sp,
                 fontWeight = FontWeight.Bold,
                 color = if (androidColor == android.graphics.Color.WHITE ||
                     androidColor == android.graphics.Color.YELLOW ||
@@ -351,6 +438,20 @@ fun WatchDisplay(letter: String, androidColor: Int, isVibrationMode: Boolean) {
                 } else {
                     ComposeColor.White
                 }
+            )
+        }
+
+        // Settings button in top-right corner
+        IconButton(
+            onClick = onSettingsClick,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(8.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Settings,
+                contentDescription = "Impostazioni",
+                tint = ComposeColor.White
             )
         }
     }

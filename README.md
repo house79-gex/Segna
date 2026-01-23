@@ -2,6 +2,50 @@
 
 Sistema professionale di comunicazione in tempo reale tra smartphone, smartwatch e ESP32 tramite Bluetooth Low Energy (BLE).
 
+## 🆕 Aggiornamento Versione 2.0
+
+### Nuove Funzionalità Principali
+
+#### 🎨 Nuove Icone App
+- Design moderno con orologio stilizzato e freccia/segnale
+- Colori Material Design: Blu (#2196F3) e bianco
+- Icone ottimizzate per tutte le densità di schermo
+
+#### ⚙️ Menu Configurazioni Watch
+L'app smartwatch ora include un menu completo di configurazioni accessibile tramite il pulsante impostazioni in alto a destra:
+
+**Modalità Visualizzazione:**
+- **Lettera e Colore** (default): Mostra sia la lettera che il colore di sfondo
+- **Solo Lettera**: Mostra solo la lettera su sfondo nero
+- **Solo Colore**: Mostra solo il colore (senza testo)
+
+**Dimensione Lettera:**
+- **Grande** (200sp): Lettera a schermo intero
+- **Media** (120sp): Dimensione standard
+- **Piccola** (60sp): Lettera compatta
+
+**Dimensione Colore:**
+- **Schermo intero**: Colore occupa tutto lo schermo
+- **Cerchio Grande**: Cerchio colorato da 300dp
+- **Cerchio Medio**: Cerchio colorato da 200dp
+- **Cerchio Piccolo**: Punto colorato da 100dp
+
+Le impostazioni vengono salvate e persistono dopo il riavvio dell'app.
+
+#### 🔐 Build Firmato per Produzione
+- Keystore di produzione configurato automaticamente
+- APK firmato pronto per installazione su qualsiasi dispositivo
+- Firma automatica per build debug e release
+
+#### 🔕 Gestione Notifiche
+- Le notifiche vengono automaticamente cancellate quando l'app è in foreground
+- Esperienza utente migliorata senza distrazioni
+
+#### 📡 Supporto Samsung Accessory Protocol (SAP)
+Per evitare conflitti con Samsung Wearable, l'app supporta l'integrazione con Samsung Accessory Protocol. Consulta `SAP_INTEGRATION_GUIDE.md` per i dettagli.
+
+---
+
 ## 📋 Descrizione
 
 Segna è un'applicazione distribuita che permette il controllo sincronizzato di dispositivi multipli tramite BLE. Il sistema è composto da:
@@ -432,10 +476,53 @@ flutter logs
 
 ## 👥 Dispositivi Testati
 
-- ✅ Samsung Galaxy S23 Ultra (Android 14)
+- ✅ Samsung Galaxy S23 Ultra (Android 14, UI 8)
+- ✅ Samsung Galaxy Watch 6 (Wear OS 5.0, UI 6, Android 14)
 - ✅ Samsung Galaxy Watch 5 (Wear OS 3.5)
 - ✅ ESP32 DevKit V1 (30 pin)
 - ✅ ESP32 WROOM-32 (38 pin)
+
+## 📦 Build Release APK
+
+Per compilare l'APK firmato della watch app:
+
+```bash
+cd wear_os_app
+./gradlew assembleRelease
+
+# L'APK firmato si trova in:
+# app/build/outputs/apk/release/app-release.apk
+```
+
+### Installazione APK su Watch
+
+1. **Abilita ADB sul Watch**:
+   - Vai in Impostazioni > Info orologio
+   - Tocca 7 volte su "Numero build"
+   - Torna indietro e apri "Opzioni sviluppatore"
+   - Attiva "Debug ADB" e "Debug via Wi-Fi"
+
+2. **Connetti il Watch via ADB**:
+   ```bash
+   # Trova l'indirizzo IP del watch (visibile in Debug via Wi-Fi)
+   adb connect <IP_WATCH>:5555
+   
+   # Verifica connessione
+   adb devices
+   ```
+
+3. **Installa l'APK**:
+   ```bash
+   adb install wear_os_app/app/build/outputs/apk/release/app-release.apk
+   ```
+
+### Note sulla Firma
+
+- **Keystore**: `wear_os_app/keystore/release.keystore`
+- **Password**: segna2026
+- **Alias**: segna_key
+- Il keystore NON è committato nel repository per sicurezza
+- Per generarlo nuovamente, vedi la sezione Build nel SAP_INTEGRATION_GUIDE.md
 
 ## 📝 Note Tecniche
 

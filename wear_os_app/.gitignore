@@ -20,3 +20,8 @@ local.properties
 
 # Log files
 *.log
+
+# Keystore files
+keystore/
+*.keystore
+*.jks
