@@ -25,17 +25,20 @@ class SettingsActivity : ComponentActivity() {
         val displayMode = prefs.getString("display_mode", "BOTH") ?: "BOTH"
         val letterSize = prefs.getInt("letter_size", 120)
         val colorSize = prefs.getString("color_size", "FULLSCREEN") ?: "FULLSCREEN"
+        val esp32Ip = prefs.getString("esp32_ip", "192.168.0.100") ?: "192.168.0.100"
 
         setContent {
             SettingsScreen(
                 initialDisplayMode = displayMode,
                 initialLetterSize = letterSize,
                 initialColorSize = colorSize,
-                onSave = { mode, size, colorSizeValue ->
+                initialEsp32Ip = esp32Ip,
+                onSave = { mode, size, colorSizeValue, ip ->
                     prefs.edit().apply {
                         putString("display_mode", mode)
                         putInt("letter_size", size)
                         putString("color_size", colorSizeValue)
+                        putString("esp32_ip", ip)
                         apply()
                     }
                     finish()
@@ -50,11 +53,13 @@ fun SettingsScreen(
     initialDisplayMode: String,
     initialLetterSize: Int,
     initialColorSize: String,
-    onSave: (String, Int, String) -> Unit
+    initialEsp32Ip: String,
+    onSave: (String, Int, String, String) -> Unit
 ) {
     var displayMode by remember { mutableStateOf(initialDisplayMode) }
     var letterSize by remember { mutableStateOf(initialLetterSize) }
     var colorSize by remember { mutableStateOf(initialColorSize) }
+    var esp32Ip by remember { mutableStateOf(initialEsp32Ip) }
 
     Column(
         modifier = Modifier
@@ -69,6 +74,27 @@ fun SettingsScreen(
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(bottom = 16.dp)
         )
+
+        // ESP32 IP Address
+        Text(
+            text = "IP ESP32",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+        )
+
+        OutlinedTextField(
+            value = esp32Ip,
+            onValueChange = { esp32Ip = it },
+            label = { Text("192.168.0.100", fontSize = 10.sp) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp),
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodySmall
+        )
+
+        Divider(modifier = Modifier.padding(vertical = 12.dp))
 
         // Display Mode
         Text(
@@ -117,7 +143,7 @@ fun SettingsScreen(
 
         // Save Button
         Button(
-            onClick = { onSave(displayMode, letterSize, colorSize) },
+            onClick = { onSave(displayMode, letterSize, colorSize, esp32Ip) },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)

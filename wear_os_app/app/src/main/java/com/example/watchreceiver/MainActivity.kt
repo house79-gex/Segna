@@ -33,20 +33,20 @@ import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.android.gms.wearable.MessageClient
-import com.google.android.gms.wearable.MessageEvent
-import com.google.android.gms.wearable.Wearable
+// Removed: import com.google.android.gms.wearable.MessageClient
+// Removed: import com.google.android.gms.wearable.MessageEvent
+// Removed: import com.google.android.gms.wearable.Wearable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
-class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListener {
+class MainActivity : ComponentActivity() {
     private var vibrator: Vibrator? = null
     private var notificationManager: NotificationManager? = null
     private var wakeLock: PowerManager.WakeLock? = null
-    private lateinit var messageClient: MessageClient
+    private lateinit var wifiReceiver: WiFiReceiver
 
     private val letterState = mutableStateOf("")
     private val colorState = mutableStateOf(android.graphics.Color.BLACK)
@@ -58,7 +58,6 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
     private val colorSizeState = mutableStateOf("FULLSCREEN")
 
     companion object {
-        private const val MESSAGE_PATH = "/segna_channel"
         private const val TAG = "WatchReceiver"
     }
 
@@ -81,14 +80,27 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         
-        // Initialize Wear OS Message Client
-        messageClient = Wearable.getMessageClient(this)
-        messageClient.addListener(this)
+        // Initialize WiFi Receiver
+        wifiReceiver = WiFiReceiver(this) { message ->
+            handleCommand(message)
+        }
         
-        android.util.Log.d(TAG, "Wear OS MessageClient initialized")
+        // Carica IP ESP32 salvato e connetti automaticamente
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        val savedIp = prefs.getString("esp32_ip", "")
+        if (!savedIp.isNullOrEmpty()) {
+            wifiReceiver.connect(savedIp)
+            Toast.makeText(this, "🔌 Connesso a ESP32: $savedIp", Toast.LENGTH_SHORT).show()
+            android.util.Log.d(TAG, "Auto-connesso a ESP32: $savedIp")
+        } else {
+            android.util.Log.d(TAG, "Nessun IP ESP32 salvato. Configurare nelle impostazioni.")
+            Toast.makeText(this, "⚠️ Configura IP ESP32 nelle impostazioni", Toast.LENGTH_LONG).show()
+        }
+        
+        android.util.Log.d(TAG, "WiFiReceiver initialized")
         
         // ⭐ Toast all'avvio
-        Toast.makeText(this, "WatchReceiver avviato", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "WatchReceiver avviato (WiFi mode)", Toast.LENGTH_SHORT).show()
         
         // Load settings
         loadSettings()
@@ -112,8 +124,14 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         notificationManager?.cancelAll()
         // Reload settings in case they changed
         loadSettings()
-        // Re-add listener
-        messageClient.addListener(this)
+        
+        // Riconnetti se necessario
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        val savedIp = prefs.getString("esp32_ip", "")
+        if (!savedIp.isNullOrEmpty() && !wifiReceiver.isConnected()) {
+            wifiReceiver.connect(savedIp)
+            android.util.Log.d(TAG, "Riconnesso a ESP32: $savedIp")
+        }
         
         // Re-acquire wakelock if it expired
         if (wakeLock?.isHeld == false) {
@@ -124,13 +142,12 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
 
     override fun onPause() {
         super.onPause()
-        // Remove listener to avoid leaks
-        messageClient.removeListener(this)
+        // Keep WiFi receiver active in background for polling
     }
 
     override fun onDestroy() {
         wakeLock?.release()
-        messageClient.removeListener(this)
+        wifiReceiver.disconnect()
         super.onDestroy()
     }
 
@@ -142,36 +159,8 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         android.util.Log.d(TAG, "Back button pressed - ignoring to keep app active")
     }
 
-    // Wear OS Message Listener
-    override fun onMessageReceived(messageEvent: MessageEvent) {
-        android.util.Log.d(TAG, "onMessageReceived called - path: ${messageEvent.path}")
-        
-        // ⭐ Toast per confermare ricezione
-        runOnUiThread {
-            Toast.makeText(
-                this, 
-                "Msg ricevuto: ${messageEvent.path}", 
-                Toast.LENGTH_LONG
-            ).show()
-        }
-        
-        if (messageEvent.path == MESSAGE_PATH) {
-            val message = String(messageEvent.data, Charsets.UTF_8)
-            android.util.Log.d(TAG, "Received message: $message")
-            
-            // ⭐ Toast con contenuto messaggio
-            runOnUiThread {
-                Toast.makeText(
-                    this, 
-                    "Dati: ${message.take(50)}", 
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-            
-            handleCommand(message)
-        }
-    }
-
+    // Removed: onMessageReceived (now handled by WiFiReceiver callback)
+    
     private fun loadSettings() {
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
         displayModeState.value = prefs.getString("display_mode", "BOTH") ?: "BOTH"

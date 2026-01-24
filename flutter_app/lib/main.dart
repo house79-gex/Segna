@@ -1,10 +1,9 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'models/settings_model.dart';
 import 'settings_page.dart';
+import 'services/wifi_communication_service.dart';
 
 void main() {
   runApp(const MyApp());
@@ -34,25 +33,17 @@ class ControllerPage extends StatefulWidget {
 }
 
 class _ControllerPageState extends State<ControllerPage> {
-  // Platform channel for Wear OS communication
+  // Platform channel for Wear OS communication (kept for watch communication)
   static const platform = MethodChannel('com.example.segna/wear');
   
-  // ESP32 BLE variables
-  BluetoothDevice? espDevice;
-  BluetoothCharacteristic? espCharacteristic;
+  // WiFi Communication Service
+  final WiFiCommunicationService _wifiService = WiFiCommunicationService();
+  final TextEditingController _ipController = TextEditingController(text: '192.168.0.100');
 
-  bool isScanning = false;
-  bool espConnected = false;
   bool watchConnected = false;
-
-  // Conferme ricezione dai dispositivi
-  String? espLastConfirmedColor;
 
   // Impostazioni
   SettingsModel? settings;
-
-  final String espServiceUuid = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
-  final String espCharacteristicUuid = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
 
   final Map<String, Map<String, dynamic>> letterData = {
     'A': {'color': Colors.white, 'colorHex': '#FFFFFF', 'colorName': 'WHITE'},
@@ -65,15 +56,8 @@ class _ControllerPageState extends State<ControllerPage> {
   @override
   void initState() {
     super.initState();
-    _requestPermissions();
     _loadSettings();
     _connectToWatch();
-  }
-
-  Future<void> _requestPermissions() async {
-    await Permission.bluetoothScan.request();
-    await Permission.bluetoothConnect.request();
-    await Permission.location.request();
   }
 
   Future<void> _loadSettings() async {
@@ -113,144 +97,101 @@ class _ControllerPageState extends State<ControllerPage> {
     }
   }
 
-  Future<void> _scanForDevices() async {
-    setState(() {
-      isScanning = true;
-    });
-
-    // Connect to watch first
-    await _connectToWatch();
-
-    try {
-      // Scan for ESP32 only via BLE
-      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 4));
-
-      FlutterBluePlus.scanResults.listen((results) {
-        for (ScanResult result in results) {
-          if (espDevice == null &&
-              (result.device.platformName.contains('ESP32') ||
-                  result.device.platformName.contains('Segna'))) {
-            espDevice = result.device;
-            _connectToESP32();
-          }
-        }
-        setState(() {});
-      });
-
-      await Future.delayed(const Duration(seconds: 4));
-      await FlutterBluePlus.stopScan();
-    } catch (e) {
-      _showError('Errore durante la scansione: $e');
-    }
-
-    setState(() {
-      isScanning = false;
-    });
-  }
-
+  // Connetti a ESP32 via WiFi
   Future<void> _connectToESP32() async {
-    if (espDevice == null) return;
+    final ip = _ipController.text.trim();
+    if (ip.isEmpty) {
+      _showError('⚠️ Inserisci un indirizzo IP valido');
+      return;
+    }
 
-    try {
-      await espDevice!.connect();
-      List<BluetoothService> services = await espDevice!.discoverServices();
-
-      for (var service in services) {
-        if (service.uuid.toString().toLowerCase() ==
-            espServiceUuid.toLowerCase()) {
-          for (var characteristic in service.characteristics) {
-            if (characteristic.uuid.toString().toLowerCase() ==
-                espCharacteristicUuid.toLowerCase()) {
-              espCharacteristic = characteristic;
-              // Abilita notifiche per ricevere conferme
-              if (characteristic.properties.notify) {
-                await characteristic.setNotifyValue(true);
-                characteristic.value.listen((value) {
-                  _handleDeviceNotification('esp32', value);
-                });
-              }
-            }
-          }
-        }
-      }
-
-      setState(() {
-        espConnected = true;
-      });
-    } catch (e) {
-      _showError('Errore connessione ESP32: $e');
+    _showMessage('🔌 Connessione a ESP32...');
+    
+    final success = await _wifiService.connect(ip);
+    setState(() {});
+    
+    if (success) {
+      _showMessage('✅ Connesso a ESP32: $ip');
+    } else {
+      _showError('❌ Impossibile connettersi a ESP32');
     }
   }
 
-  void _handleDeviceNotification(String deviceType, List<int> value) {
-    try {
-      final jsonString = String.fromCharCodes(value);
-      final data = jsonDecode(jsonString);
-      if (data['status'] == 'received') {
-        setState(() {
-          if (deviceType == 'esp32') {
-            espLastConfirmedColor = data['color'];
-          }
-        });
-      }
-    } catch (e) {
-      // Ignora errori di parsing
-    }
+  // Disconnetti da ESP32
+  void _disconnectFromESP32() {
+    _wifiService.disconnect();
+    setState(() {});
+    _showMessage('🔌 Disconnesso da ESP32');
   }
 
   Future<void> _sendCommand(String letter) async {
-    if (settings == null) return;
+    if (settings == null) {
+      _showError('⚠️ Impostazioni non caricate');
+      return;
+    }
+
+    if (!_wifiService.isConnected) {
+      _showError('⚠️ Non connesso a ESP32. Connetti prima di inviare comandi.');
+      return;
+    }
 
     final data = letterData[letter]!;
-    final payload = jsonEncode({
-      'letter': letter,
-      'color': data['colorHex'],
-      'colorName': data['colorName'],
-      'settings': settings!.toJson(),
-    });
+    
+    // Invia a ESP32 via WiFi
+    final success = await _wifiService.sendLetter(
+      letter, 
+      data['colorHex'],
+      data['colorName'],
+      settings!.toJson()
+    );
 
-    await _sendToDevices(payload);
+    if (!success) {
+      _showError('❌ Errore invio a ESP32');
+      return;
+    }
 
-    // Reset conferme precedenti quando si invia un nuovo comando
-    setState(() {
-      espLastConfirmedColor = null;
-    });
+    // Invia a Watch via Wear OS Data Layer
+    if (watchConnected) {
+      final payload = jsonEncode({
+        'letter': letter,
+        'color': data['colorHex'],
+        'colorName': data['colorName'],
+        'settings': settings!.toJson(),
+      });
+      
+      try {
+        await platform.invokeMethod('sendMessage', {'message': payload});
+      } catch (e) {
+        _showError('⚠️ Errore invio Watch: $e');
+      }
+    }
+
+    _showMessage('✅ Comando inviato: $letter');
   }
 
   Future<void> _sendReset() async {
     if (settings == null) return;
 
-    final payload = jsonEncode({
-      'command': 'RESET',
-      'settings': settings!.toResetJson(),
-    });
-    await _sendToDevices(payload);
-
-    // Reset conferme
-    setState(() {
-      espLastConfirmedColor = null;
-    });
-  }
-
-  Future<void> _sendToDevices(String payload) async {
-    // Send to ESP32 via BLE
-    if (espCharacteristic != null) {
-      try {
-        final bytes = utf8.encode(payload);
-        await espCharacteristic!.write(bytes);
-      } catch (e) {
-        _showError('Errore invio ESP32: $e');
-      }
+    // Invia a ESP32 via WiFi
+    if (_wifiService.isConnected) {
+      await _wifiService.sendReset(settings!.toResetJson());
     }
 
-    // Send to watch via Wear OS platform channel
+    // Invia a Watch via Wear OS Data Layer
     if (watchConnected) {
+      final payload = jsonEncode({
+        'command': 'RESET',
+        'settings': settings!.toResetJson(),
+      });
+      
       try {
         await platform.invokeMethod('sendMessage', {'message': payload});
       } catch (e) {
-        _showError('Errore invio Watch: $e');
+        print('Errore invio Watch: $e');
       }
     }
+
+    _showMessage('🔄 Reset inviato');
   }
 
   Future<void> _closeWatchApp() async {
@@ -292,28 +233,44 @@ class _ControllerPageState extends State<ControllerPage> {
           Column(
             children: [
               const SizedBox(height: 16),
-              // Pulsante Connetti/Scansiona
-              ElevatedButton.icon(
-                icon: Icon(isScanning
-                    ? Icons.hourglass_empty
-                    : Icons.bluetooth_searching),
-                label: Text(isScanning ? 'Scansione...' : 'Connetti Dispositivi'),
-                onPressed: isScanning ? null : _scanForDevices,
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+              // Sezione connessione WiFi ESP32
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: Column(
+                  children: [
+                    TextField(
+                      controller: _ipController,
+                      decoration: const InputDecoration(
+                        labelText: 'IP ESP32',
+                        hintText: '192.168.0.100',
+                        prefixIcon: Icon(Icons.wifi),
+                        border: OutlineInputBorder(),
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    ),
+                    const SizedBox(height: 10),
+                    ElevatedButton.icon(
+                      onPressed: _wifiService.isConnected ? _disconnectFromESP32 : _connectToESP32,
+                      icon: Icon(_wifiService.isConnected ? Icons.wifi_off : Icons.wifi),
+                      label: Text(_wifiService.isConnected ? 'Disconnetti ESP32' : 'Connetti ESP32'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _wifiService.isConnected ? Colors.red : Colors.green,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                      ),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 16),
-              // Icone dispositivi
+              // Stato dispositivi
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Container(
                     decoration: BoxDecoration(
                       border: Border.all(
-                        color: espLastConfirmedColor != null
-                            ? _getColorFromHex(espLastConfirmedColor!)
-                            : Colors.transparent,
+                        color: _wifiService.isConnected ? Colors.green : Colors.transparent,
                         width: 3,
                       ),
                       borderRadius: BorderRadius.circular(8),
@@ -323,13 +280,13 @@ class _ControllerPageState extends State<ControllerPage> {
                       children: [
                         Icon(
                           Icons.router,
-                          color: espConnected ? Colors.green : Colors.grey,
+                          color: _wifiService.isConnected ? Colors.green : Colors.grey,
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          'ESP32',
+                          'ESP32 WiFi',
                           style: TextStyle(
-                            color: espConnected ? Colors.green : Colors.grey,
+                            color: _wifiService.isConnected ? Colors.green : Colors.grey,
                           ),
                         ),
                       ],
@@ -451,7 +408,8 @@ class _ControllerPageState extends State<ControllerPage> {
 
   @override
   void dispose() {
-    espDevice?.disconnect();
+    _wifiService.disconnect();
+    _ipController.dispose();
     super.dispose();
   }
 }
