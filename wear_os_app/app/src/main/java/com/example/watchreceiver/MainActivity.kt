@@ -9,6 +9,7 @@ import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -86,6 +87,9 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         
         android.util.Log.d(TAG, "Wear OS MessageClient initialized")
         
+        // ⭐ Toast all'avvio
+        Toast.makeText(this, "WatchReceiver avviato", Toast.LENGTH_SHORT).show()
+        
         // Load settings
         loadSettings()
 
@@ -140,9 +144,30 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
 
     // Wear OS Message Listener
     override fun onMessageReceived(messageEvent: MessageEvent) {
+        android.util.Log.d(TAG, "onMessageReceived called - path: ${messageEvent.path}")
+        
+        // ⭐ Toast per confermare ricezione
+        runOnUiThread {
+            Toast.makeText(
+                this, 
+                "Msg ricevuto: ${messageEvent.path}", 
+                Toast.LENGTH_LONG
+            ).show()
+        }
+        
         if (messageEvent.path == MESSAGE_PATH) {
             val message = String(messageEvent.data, Charsets.UTF_8)
             android.util.Log.d(TAG, "Received message: $message")
+            
+            // ⭐ Toast con contenuto messaggio
+            runOnUiThread {
+                Toast.makeText(
+                    this, 
+                    "Dati: ${message.take(50)}", 
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+            
             handleCommand(message)
         }
     }
@@ -162,6 +187,18 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
     private fun handleCommand(json: String) {
         try {
             val jsonObject = JSONObject(json)
+            
+            android.util.Log.d(TAG, "Parsing JSON: $json")
+            
+            // ⭐ Toast per parsing
+            runOnUiThread {
+                val letter = jsonObject.optString("letter", "?")
+                Toast.makeText(
+                    this, 
+                    "Parsing lettera: $letter", 
+                    Toast.LENGTH_LONG
+                ).show()
+            }
 
             // Handle close app command
             if (jsonObject.optBoolean("closeApp", false)) {
@@ -173,6 +210,8 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
 
             if (jsonObject.has("command") && jsonObject.getString("command") == "RESET") {
                 // Gestione comando RESET
+                android.util.Log.d(TAG, "Processing RESET command")
+                
                 val settings = if (jsonObject.has("settings")) {
                     jsonObject.getJSONObject("settings")
                 } else null
@@ -190,9 +229,14 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                     }
                 }
 
-                letterState.value = ""
-                colorState.value = android.graphics.Color.BLACK
-                isVibrationMode.value = false
+                runOnUiThread {
+                    letterState.value = ""
+                    colorState.value = android.graphics.Color.BLACK
+                    isVibrationMode.value = false
+                    
+                    // ⭐ Toast RESET
+                    Toast.makeText(this, "RESET eseguito", Toast.LENGTH_SHORT).show()
+                }
 
             } else if (jsonObject.has("letter")) {
                 val letter = jsonObject.getString("letter")
@@ -216,10 +260,14 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                 }
 
                 if (vibrationMode && vibrator?.hasVibrator() == true) {
+                    android.util.Log.d(TAG, "Vibration mode activated")
+                    
                     // Modalità vibrazione: schermo nero + vibrazioni
-                    isVibrationMode.value = true
-                    colorState.value = android.graphics.Color.BLACK
-                    letterState.value = ""
+                    runOnUiThread {
+                        isVibrationMode.value = true
+                        colorState.value = android.graphics.Color.BLACK
+                        letterState.value = ""
+                    }
 
                     // Determina numero di vibrazioni in base alla lettera
                     val vibrationCount = when (letter) {
@@ -244,14 +292,34 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                         }
                     }
                 } else {
+                    android.util.Log.d(TAG, "Display mode activated")
+                    
                     // Modalità display: lettera e colore
-                    isVibrationMode.value = false
-                    letterState.value = letter
-                    colorState.value = color
+                    runOnUiThread {
+                        isVibrationMode.value = false
+                        letterState.value = letter
+                        colorState.value = color
+                        
+                        // ⭐ Toast prima di mostrare lettera
+                        Toast.makeText(
+                            this, 
+                            "Mostro: $letter", 
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
                 }
             }
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Error parsing message", e)
+            
+            // ⭐ Toast errore
+            runOnUiThread {
+                Toast.makeText(
+                    this, 
+                    "ERRORE: ${e.message}", 
+                    Toast.LENGTH_LONG
+                ).show()
+            }
         }
     }
 }
