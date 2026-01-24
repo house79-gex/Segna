@@ -1,0 +1,2 @@
+# Ignore WiFi configuration with real credentials
+esp32_wifi_server/config.h

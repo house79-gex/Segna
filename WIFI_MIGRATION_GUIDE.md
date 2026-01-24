@@ -37,12 +37,13 @@ The Segna project has been migrated from Bluetooth to WiFi communication to reso
 - CORS enabled for web clients
 
 **Setup:**
-1. Open `esp32_code/esp32_wifi_server/config.h`
-2. Set your WiFi credentials:
+1. Copy `esp32_code/esp32_wifi_server/config.h.template` to `config.h`
+2. Open `config.h` and set your WiFi credentials:
    ```cpp
    #define WIFI_SSID "YOUR_WIFI_SSID"
    #define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
    ```
+   **⚠️ IMPORTANT:** Never commit `config.h` with real credentials to version control!
 3. Upload to ESP32 via Arduino IDE
 4. Open Serial Monitor to see assigned IP address
 
@@ -120,8 +121,9 @@ cd wear_os_app
 
 #### 1. Configure ESP32
 ```bash
-1. Edit esp32_code/esp32_wifi_server/config.h
-2. Set WIFI_SSID and WIFI_PASSWORD
+1. Copy esp32_code/esp32_wifi_server/config.h.template to config.h
+2. Edit config.h and set WIFI_SSID and WIFI_PASSWORD
+   ⚠️ WARNING: Do NOT commit config.h with real credentials!
 3. Upload sketch to ESP32
 4. Open Serial Monitor (115200 baud)
 5. Note the IP address (e.g., 192.168.0.100)
@@ -291,6 +293,11 @@ Web-based status page (open in browser).
 - No authentication
 - No encryption (HTTP not HTTPS)
 - Open network access
+
+⚠️ **Important Security Notes:**
+- **Never commit `config.h` with real WiFi credentials to version control**
+- Use `config.h.template` as a reference and create your own `config.h` locally
+- The `.gitignore` file is configured to exclude `config.h` automatically
 
 🛡️ **Production Recommendations:**
 1. Add authentication token/password

@@ -16,7 +16,7 @@ class WiFiCommunicationService {
       
       final response = await http
           .get(Uri.parse('http://$ipAddress/status'))
-          .timeout(const Duration(seconds: 5));
+          .timeout(const Duration(seconds: 3)); // Reduced timeout for better UX
       
       if (response.statusCode == 200) {
         esp32Ip = ipAddress;

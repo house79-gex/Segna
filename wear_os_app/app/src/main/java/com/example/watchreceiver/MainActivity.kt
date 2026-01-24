@@ -90,17 +90,17 @@ class MainActivity : ComponentActivity() {
         val savedIp = prefs.getString("esp32_ip", "")
         if (!savedIp.isNullOrEmpty()) {
             wifiReceiver.connect(savedIp)
-            Toast.makeText(this, "🔌 Connesso a ESP32: $savedIp", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Connected to ESP32: $savedIp", Toast.LENGTH_SHORT).show()
             android.util.Log.d(TAG, "Auto-connesso a ESP32: $savedIp")
         } else {
             android.util.Log.d(TAG, "Nessun IP ESP32 salvato. Configurare nelle impostazioni.")
-            Toast.makeText(this, "⚠️ Configura IP ESP32 nelle impostazioni", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Configure ESP32 IP in settings", Toast.LENGTH_LONG).show()
         }
         
         android.util.Log.d(TAG, "WiFiReceiver initialized")
         
-        // ⭐ Toast all'avvio
-        Toast.makeText(this, "WatchReceiver avviato (WiFi mode)", Toast.LENGTH_SHORT).show()
+        // Toast all'avvio
+        Toast.makeText(this, "WatchReceiver started - WiFi mode", Toast.LENGTH_SHORT).show()
         
         // Load settings
         loadSettings()

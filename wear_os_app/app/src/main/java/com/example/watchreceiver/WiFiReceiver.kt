@@ -20,7 +20,10 @@ class WiFiReceiver(
     private var pollingJob: Job? = null
     private var esp32Ip: String? = null
     private var lastTimestamp: Long = 0
-    private val pollingIntervalMs = 500L // Poll ogni 500ms
+    
+    // Polling configuration
+    private val pollingIntervalMs = 500L // Poll every 500ms for ~2s max latency
+    private val errorRetryDelayMs = 2000L // Wait longer on network errors
     
     companion object {
         private const val TAG = "WiFiReceiver"
@@ -60,7 +63,7 @@ class WiFiReceiver(
                     delay(pollingIntervalMs)
                 } catch (e: Exception) {
                     Log.e(TAG, "❌ Errore polling: ${e.message}")
-                    delay(2000) // Attendi più a lungo in caso di errore
+                    delay(errorRetryDelayMs) // Use configurable error delay
                 }
             }
             

@@ -246,7 +246,7 @@ class _ControllerPageState extends State<ControllerPage> {
                         prefixIcon: Icon(Icons.wifi),
                         border: OutlineInputBorder(),
                       ),
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: false),
                     ),
                     const SizedBox(height: 10),
                     ElevatedButton.icon(

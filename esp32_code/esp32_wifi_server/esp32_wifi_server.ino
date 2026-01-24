@@ -28,7 +28,7 @@ struct State {
   String color = "#000000";
   String colorName = "";
   String command = "";
-  JsonDocument settings;
+  JsonDocument settings; // Uses dynamic allocation - sufficient for typical payloads
   unsigned long lastUpdate = 0;
 } currentState;
 
