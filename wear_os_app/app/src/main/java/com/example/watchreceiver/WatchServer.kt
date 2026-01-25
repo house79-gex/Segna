@@ -9,7 +9,7 @@ import org.json.JSONObject
  * 
  * Porta: 5000
  * Endpoints:
- * - GET /status -> {"status": "ok"}
+ * - GET /status -> {"status":"ok","version":"1.0","uptime":12345}
  * - POST /command -> Riceve comandi JSON
  */
 class WatchServer(
@@ -19,6 +19,8 @@ class WatchServer(
     companion object {
         private const val TAG = "WatchServer"
     }
+    
+    private val serverStartTime = System.currentTimeMillis()
     
     override fun serve(session: IHTTPSession): Response {
         val uri = session.uri
@@ -33,11 +35,12 @@ class WatchServer(
             }
             
             method == Method.GET && uri == "/status" -> {
-                Log.d(TAG, "✅ Status check")
+                val uptime = System.currentTimeMillis() - serverStartTime
+                Log.d(TAG, "✅ Status check - Uptime: ${uptime}ms")
                 newFixedLengthResponse(
                     Response.Status.OK,
                     "application/json",
-                    """{"status": "ok"}"""
+                    """{"status":"ok","version":"1.0","uptime":$uptime}"""
                 )
             }
             

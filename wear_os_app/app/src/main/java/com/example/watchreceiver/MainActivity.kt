@@ -24,17 +24,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.Text
-import com.google.android.gms.wearable.*
 import org.json.JSONObject
 
-class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListener {
+class MainActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
-        private const val MESSAGE_PATH = "/segna_channel"
     }
 
-    private lateinit var messageClient: MessageClient
     private var vibrator: Vibrator? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var watchServer: WatchServer? = null
@@ -46,9 +43,6 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        messageClient = Wearable.getMessageClient(this)
-        messageClient.addListener(this)
-
         vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
 
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -59,11 +53,12 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
             acquire()
         }
 
+        // Start HTTP server (WiFi communication only)
         watchServer = WatchServer { message ->
             handleCommand(message)
         }
-        watchServer?.start(5000)
-        Log.d(TAG, "Server HTTP watch avviato")
+        watchServer?.start()
+        Log.d(TAG, "⌚ Server HTTP watch avviato su porta 5000")
 
         setContent {
             WatchReceiverScreen()
@@ -72,14 +67,6 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
 
     override fun onBackPressed() {
         // Disabled
-    }
-
-    override fun onMessageReceived(messageEvent: MessageEvent) {
-        if (messageEvent.path == MESSAGE_PATH) {
-            val message = String(messageEvent.data, Charsets.UTF_8)
-            Log.d(TAG, "📨 Messaggio ricevuto via Wear OS: $message")
-            handleCommand(message)
-        }
     }
 
     private fun handleCommand(message: String) {
