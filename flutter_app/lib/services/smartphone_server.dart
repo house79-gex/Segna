@@ -73,22 +73,22 @@ class SmartphoneServer {
     print('🔄 Stato reset per watch');
   }
   
-  String _getLocalIp() {
-    try {
-        for (var interface in NetworkInterface.list(includeLoopback: false, type: InternetAddressType.IPv4)) {
-        for (var addr in interface.addresses) {
-          if (addr.type == InternetAddressType.IPv4 && 
-              !addr.isLoopback && 
-              !addr.address.startsWith('169.254')) {
-            return addr.address;
-          }
+String _getLocalIp() {
+  try {
+    for (var interface in NetworkInterface.list(includeLoopback: false, type: InternetAddressType.IPv4)) {
+      for (var addr in interface.addresses) {
+        if (addr.type == InternetAddressType.IPv4 && 
+            !addr.isLoopback && 
+            !addr.address.startsWith('169.254')) {
+          return addr.address;
         }
       }
-    } catch (e) {
-      print('⚠️ Errore rilevamento IP: $e');
     }
-    return 'unknown';
+  } catch (e) {
+    print('⚠️ Errore rilevamento IP: $e');
   }
+  return 'unknown';
+}
   
   void stop() {
     _server?.close();
