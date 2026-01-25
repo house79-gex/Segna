@@ -75,7 +75,7 @@ class SmartphoneServer {
   
   String _getLocalIp() {
     try {
-      for (var interface in NetworkInterface.listSync()) {
+        for (var interface in NetworkInterface.list(includeLoopback: false, type: InternetAddressType.IPv4)) {
         for (var addr in interface.addresses) {
           if (addr.type == InternetAddressType.IPv4 && 
               !addr.isLoopback && 
