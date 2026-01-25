@@ -147,3 +147,292 @@ class _ControllerPageState extends State<ControllerPage> {
     bool esp32Success = false;
     bool watchSuccess = false;
 
+    if (_wifiService.isConnected) {
+      esp32Success = await _wifiService.sendLetter(
+        letter, 
+        data['colorHex'],
+        data['colorName'],
+        settings!.toJson()
+      );
+      if (!esp32Success) {
+        _showError('❌ Errore invio a ESP32');
+      }
+    }
+
+    if (_watchWifiService.isConnected) {
+      watchSuccess = await _watchWifiService.sendLetter(
+        letter,
+        data['colorHex'],
+        data['colorName'],
+        settings!.toJson()
+      );
+      
+      if (!watchSuccess && watchConnected) {
+        try {
+          final payload = jsonEncode({
+            'letter': letter,
+            'color': data['colorHex'],
+            'colorName': data['colorName'],
+            'settings': settings!.toJson(),
+          });
+          await platform.invokeMethod('sendMessage', {'message': payload});
+          watchSuccess = true;
+          print('✅ Fallback Bluetooth Wear OS riuscito');
+        } catch (e) {
+          print('❌ Errore Bluetooth Wear OS: $e');
+        }
+      }
+    } else if (watchConnected) {
+      try {
+        final payload = jsonEncode({
+          'letter': letter,
+          'color': data['colorHex'],
+          'colorName': data['colorName'],
+          'settings': settings!.toJson(),
+        });
+        await platform.invokeMethod('sendMessage', {'message': payload});
+        watchSuccess = true;
+      } catch (e) {
+        _showError('⚠️ Errore invio Watch: $e');
+      }
+    }
+
+    if (esp32Success && watchSuccess) {
+      _showMessage('✅ Comando inviato: $letter (ESP32 + Watch)');
+    } else if (esp32Success) {
+      _showMessage('✅ Comando inviato: $letter (solo ESP32)');
+    } else if (watchSuccess) {
+      _showMessage('✅ Comando inviato: $letter (solo Watch)');
+    } else {
+      _showError('❌ Nessun dispositivo disponibile');
+    }
+  }
+
+  Future<void> _sendReset() async {
+    if (settings == null) return;
+
+    if (_wifiService.isConnected) {
+      await _wifiService.sendReset(settings!.toResetJson());
+    }
+
+    if (_watchWifiService.isConnected) {
+      await _watchWifiService.sendReset(settings!.toResetJson());
+    }
+
+    if (watchConnected) {
+      final payload = jsonEncode({
+        'command': 'RESET',
+        'settings': settings!.toResetJson(),
+      });
+      try {
+        await platform.invokeMethod('sendMessage', {'message': payload});
+      } catch (e) {
+        print('Errore invio Watch: $e');
+      }
+    }
+    _showMessage('🔄 Reset inviato');
+  }
+
+  Future<void> _closeWatchApp() async {
+    try {
+      await platform.invokeMethod('closeWatchApp');
+      _showMessage('Comando chiusura inviato al watch');
+    } catch (e) {
+      _showError('Errore chiusura watch: $e');
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        title: const Text('Segna Controller'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: _openSettings,
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          Column(
+            children: [
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: Column(
+                  children: [
+                    const Text('🔌 ESP32', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _ipController,
+                      decoration: const InputDecoration(
+                        labelText: 'IP ESP32',
+                        hintText: '192.168.0.125',
+                        prefixIcon: Icon(Icons.router),
+                        border: OutlineInputBorder(),
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: false),
+                    ),
+                    const SizedBox(height: 8),
+                    ElevatedButton.icon(
+                      onPressed: _wifiService.isConnected ? _disconnectFromESP32 : _connectToESP32,
+                      icon: Icon(_wifiService.isConnected ? Icons.wifi_off : Icons.wifi),
+                      label: Text(_wifiService.isConnected ? 'Disconnetti ESP32' : 'Connetti ESP32'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _wifiService.isConnected ? Colors.red : Colors.green,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 32),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: Column(
+                  children: [
+                    const Text('⌚ Watch WiFi', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _watchIpController,
+                      decoration: const InputDecoration(
+                        labelText: 'IP Watch',
+                        hintText: '192.168.0.124',
+                        prefixIcon: Icon(Icons.watch),
+                        border: OutlineInputBorder(),
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: false),
+                    ),
+                    const SizedBox(height: 8),
+                    ElevatedButton.icon(
+                      onPressed: _watchWifiService.isConnected ? _disconnectFromWatchWiFi : _connectToWatchWiFi,
+                      icon: Icon(_watchWifiService.isConnected ? Icons.wifi_off : Icons.wifi),
+                      label: Text(_watchWifiService.isConnected ? 'Disconnetti Watch' : 'Connetti Watch'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _watchWifiService.isConnected ? Colors.red : Colors.blue,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: _wifiService.isConnected ? Colors.green : Colors.transparent, width: 3),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    padding: const EdgeInsets.all(8),
+                    child: Row(
+                      children: [
+                        Icon(Icons.router, color: _wifiService.isConnected ? Colors.green : Colors.grey),
+                        const SizedBox(width: 4),
+                        Text('ESP32', style: TextStyle(color: _wifiService.isConnected ? Colors.green : Colors.grey)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: _watchWifiService.isConnected || watchConnected ? Colors.green : Colors.transparent, width: 3),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    padding: const EdgeInsets.all(8),
+                    child: Row(
+                      children: [
+                        Icon(Icons.watch, color: _watchWifiService.isConnected || watchConnected ? Colors.green : Colors.grey),
+                        const SizedBox(width: 4),
+                        Text(
+                          _watchWifiService.isConnected ? 'Watch WiFi' : (watchConnected ? 'Watch BT' : 'Watch'),
+                          style: TextStyle(color: _watchWifiService.isConnected || watchConnected ? Colors.green : Colors.grey, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              if (watchConnected)
+                TextButton.icon(
+                  icon: const Icon(Icons.close, size: 16),
+                  label: const Text('Chiudi App Watch'),
+                  onPressed: _closeWatchApp,
+                  style: TextButton.styleFrom(foregroundColor: Colors.red),
+                ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(vertical: 16.0),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: letterData.entries.map((entry) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8.0),
+                        child: SizedBox(
+                          width: 200,
+                          height: 60,
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: entry.value['color'] as Color,
+                              foregroundColor: entry.key == 'A' || entry.key == 'B' ? Colors.black : Colors.white,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            ),
+                            onPressed: () => _sendCommand(entry.key),
+                            child: Text(entry.key, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          Positioned(
+            bottom: 16,
+            right: 16,
+            child: SizedBox(
+              width: 70,
+              height: 70,
+              child: FloatingActionButton(
+                backgroundColor: Colors.black,
+                foregroundColor: Colors.white,
+                onPressed: _sendReset,
+                child: const Text('Reset', textAlign: TextAlign.center, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _wifiService.disconnect();
+    _watchWifiService.disconnect();
+    _ipController.dispose();
+    _watchIpController.dispose();
+    super.dispose();
+  }
+}
