@@ -37,7 +37,6 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
     private lateinit var messageClient: MessageClient
     private var vibrator: Vibrator? = null
     private var wakeLock: PowerManager.WakeLock? = null
-    private var wifiReceiver: WiFiReceiver? = null
     private var watchServer: WatchServer? = null
 
     private val letterState = mutableStateOf("")
@@ -66,27 +65,9 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         watchServer?.start(5000)
         Log.d(TAG, "Server HTTP watch avviato")
 
-        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-        val esp32Ip = prefs.getString("esp32_ip", "192.168.0.100") ?: "192.168.0.100"
-
-        wifiReceiver = WiFiReceiver(esp32Ip) { letter, color ->
-            runOnUiThread {
-                handleLetterReceived(letter, color)
-            }
-        }
-        wifiReceiver?.startPolling()
-
         setContent {
             WatchReceiverScreen()
         }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        wakeLock?.release()
-        wifiReceiver?.stopPolling()
-        watchServer?.stop()
-        Wearable.getMessageClient(this).removeListener(this)
     }
 
     override fun onBackPressed() {
@@ -247,18 +228,6 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
             }
         } catch (e: Exception) {
             Log.e(TAG, "Errore parsing messaggio: ${e.message}")
-        }
-    }
-
-    private fun handleLetterReceived(letter: String, colorHex: String) {
-        try {
-            val color = Color.parseColor(colorHex)
-            letterState.value = letter
-            colorState.value = color
-            isVibrationMode.value = false
-            Toast.makeText(this, "Ricevuto via WiFi: $letter", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            Log.e(TAG, "Errore conversione colore: ${e.message}")
         }
     }
 
