@@ -145,17 +145,20 @@ class MainActivity : ComponentActivity() {
         }
     }
     
-    private fun handleReset(json: JSONObject) {
-        _currentLetter.value = "?"
-        _currentColor.value = Color.Gray
-        _isDisplayMode.value = true
+   private fun handleReset(json: JSONObject) {
+    _currentLetter.value = "?"
+    _currentColor.value = Color.Gray
+    _isDisplayMode.value = true
+    
+    // Vibrazione reset SOLO se abilitata nei settings
+    try {
+        val settings = if (json.has("settings")) {
+            json.getJSONObject("settings").getJSONObject("watch")
+        } else null
         
-        // Vibrazione reset
-        try {
-            val settings = if (json.has("settings")) {
-                json.getJSONObject("settings").getJSONObject("watch")
-            } else null
-            
+        val vibrationEnabled = settings?.optBoolean("vibrationEnabled", true) ?: true
+        
+        if (vibrationEnabled) {
             val duration = settings?.optInt("vibrationDuration", 700) ?: 700
             
             vibrator?.vibrate(
@@ -165,10 +168,13 @@ class MainActivity : ComponentActivity() {
                 )
             )
             Log.d(TAG, "📳 Reset vibration: ${duration}ms")
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Errore vibrazione reset: ${e.message}")
+        } else {
+            Log.d(TAG, "🔇 Reset vibration DISABLED by settings")
         }
+    } catch (e: Exception) {
+        Log.e(TAG, "❌ Errore vibrazione reset: ${e.message}")
     }
+}
     
     private fun handleVibration(letter: String, settings: JSONObject?) {
         try {
@@ -238,7 +244,7 @@ fun WatchReceiverApp(
     fontSize: Int,
     onFontSizeChange: (Int) -> Unit
 ) {
-    var showMenu by remember { mutableStateOf(false) }
+    var showFontControls by remember { mutableStateOf(false) }
     
     Scaffold(
         timeText = { }
@@ -255,6 +261,7 @@ fun WatchReceiverApp(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
+                    // Lettera grande
                     Text(
                         text = letter,
                         fontSize = fontSize.sp,
@@ -265,42 +272,57 @@ fun WatchReceiverApp(
                     
                     Spacer(modifier = Modifier.height(16.dp))
                     
-                    // Pulsanti dimensione font
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    // Pulsante per mostrare/nascondere controlli
+                    Button(
+                        onClick = { showFontControls = !showFontControls },
+                        modifier = Modifier.size(50.dp)
                     ) {
-                        Button(
-                            onClick = { 
-                                if (fontSize > 40) onFontSizeChange(fontSize - 10)
-                            },
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Text("-", fontSize = 20.sp)
-                        }
-                        
                         Text(
-                            text = "${fontSize}sp",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            modifier = Modifier.align(Alignment.CenterVertically)
+                            text = if (showFontControls) "✓" else "Aa",
+                            fontSize = 16.sp
                         )
+                    }
+                    
+                    // Controlli dimensione (solo se showFontControls = true)
+                    if (showFontControls) {
+                        Spacer(modifier = Modifier.height(8.dp))
                         
-                        Button(
-                            onClick = { 
-                                if (fontSize < 120) onFontSizeChange(fontSize + 10)
-                            },
-                            modifier = Modifier.size(40.dp)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("+", fontSize = 20.sp)
+                            Button(
+                                onClick = { 
+                                    if (fontSize > 40) onFontSizeChange(fontSize - 10)
+                                },
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Text("-", fontSize = 20.sp)
+                            }
+                            
+                            Text(
+                                text = "${fontSize}",
+                                color = Color.White,
+                                fontSize = 14.sp
+                            )
+                            
+                            Button(
+                                onClick = { 
+                                    if (fontSize < 120) onFontSizeChange(fontSize + 10)
+                                },
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Text("+", fontSize = 20.sp)
+                            }
                         }
                     }
                 }
             } else {
-                // Modalità vibrazione: solo icona
+                // Modalità vibrazione: solo icona GRIGIA
                 Text(
                     text = "📳",
                     fontSize = 60.sp,
-                    color = Color.Gray,
+                    color = Color(0xFF808080),  // ← Grigio come "?"
                     textAlign = TextAlign.Center
                 )
             }
