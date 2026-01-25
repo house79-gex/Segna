@@ -60,6 +60,13 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "WatchReceiver"
+        
+        // Amplitude constants for intensity pattern (0-255 range)
+        private const val AMPLITUDE_A = 128  // 50% intensity
+        private const val AMPLITUDE_B = 166  // 65% intensity
+        private const val AMPLITUDE_C = 204  // 80% intensity
+        private const val AMPLITUDE_D = 242  // 95% intensity
+        private const val AMPLITUDE_E = 255  // 100% intensity
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -169,7 +176,7 @@ class MainActivity : ComponentActivity() {
     /**
      * Esegue pattern di vibrazione avanzati in base al tipo selezionato
      * 
-     * @param letter Lettera da A a E
+     * @param letter Lettera da A a E (valori validi: "A", "B", "C", "D", "E")
      * @param pattern Tipo di pattern: numeric, morse, intensity, melodic
      * @param duration Durata base della vibrazione in ms
      * @param pause Pausa tra vibrazioni in ms
@@ -177,6 +184,8 @@ class MainActivity : ComponentActivity() {
      * 
      * Nota: Tutte le vibrazioni usano coroutine su Dispatchers.Main per garantire
      * l'esecuzione sul thread UI richiesto dall'API Vibrator Android
+     * 
+     * Se letter non è valido (A-E), verrà usato il pattern per "A" come fallback
      */
     private suspend fun executeVibrationPattern(
         letter: String,
@@ -184,6 +193,11 @@ class MainActivity : ComponentActivity() {
         duration: Long,
         pause: Long
     ) {
+        // Validate letter input
+        if (letter !in listOf("A", "B", "C", "D", "E")) {
+            android.util.Log.w(TAG, "Invalid letter '$letter', using 'A' as fallback")
+        }
+        
         when (pattern) {
             "numeric" -> executeNumericPattern(letter, duration, pause)
             "morse" -> executeMorsePattern(letter, duration, pause)
@@ -252,12 +266,12 @@ class MainActivity : ComponentActivity() {
      */
     private suspend fun executeIntensityPattern(letter: String, duration: Long) {
         val amplitude = when (letter) {
-            "A" -> 128  // 50%
-            "B" -> 166  // 65%
-            "C" -> 204  // 80%
-            "D" -> 242  // 95%
-            "E" -> 255  // 100%
-            else -> 255
+            "A" -> AMPLITUDE_A
+            "B" -> AMPLITUDE_B
+            "C" -> AMPLITUDE_C
+            "D" -> AMPLITUDE_D
+            "E" -> AMPLITUDE_E
+            else -> AMPLITUDE_E
         }
         
         vibrator?.vibrate(VibrationEffect.createOneShot(duration * 2, amplitude))

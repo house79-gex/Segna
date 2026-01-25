@@ -419,6 +419,8 @@ class _ControllerPageState extends State<ControllerPage> {
                 ],
               ),
               const SizedBox(height: 8),
+              // Close Watch App button
+              if (watchConnected)
                 TextButton.icon(
                   icon: const Icon(Icons.close, size: 16),
                   label: const Text('Chiudi App Watch'),
