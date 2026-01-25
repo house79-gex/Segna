@@ -3,6 +3,26 @@ import 'package:http/http.dart' as http;
 
 /// Service per comunicazione WiFi con Watch
 /// Invia comandi direttamente al Watch via HTTP POST
+/// 
+/// Example usage:
+/// ```dart
+/// final watchService = WatchWiFiService();
+/// 
+/// // Connect to watch
+/// final connected = await watchService.connect('192.168.0.124');
+/// if (connected) {
+///   // Send command
+///   await watchService.sendCommand('A', '#FFFFFF', 'WHITE', settings);
+/// }
+/// 
+/// // Disconnect when done
+/// watchService.disconnect();
+/// ```
+/// 
+/// Error handling:
+/// - All methods return bool indicating success/failure
+/// - Errors are logged to console with descriptive messages
+/// - Network timeouts are set to 3 seconds for responsive UX
 class WatchWiFiService {
   String? watchIp;
   bool isConnected = false;

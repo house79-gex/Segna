@@ -173,6 +173,10 @@ class MainActivity : ComponentActivity() {
      * @param pattern Tipo di pattern: numeric, morse, intensity, melodic
      * @param duration Durata base della vibrazione in ms
      * @param pause Pausa tra vibrazioni in ms
+     * @throws IllegalStateException se vibrator non è disponibile
+     * 
+     * Nota: Tutte le vibrazioni usano coroutine su Dispatchers.Main per garantire
+     * l'esecuzione sul thread UI richiesto dall'API Vibrator Android
      */
     private suspend fun executeVibrationPattern(
         letter: String,
