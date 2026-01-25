@@ -145,5 +145,5 @@ class _ControllerPageState extends State<ControllerPage> {
 
     final data = letterData[letter]!;
     bool esp32Success = false;
-    bool watchSuccess = false;_
-
+    bool watchSuccess = false;
+
