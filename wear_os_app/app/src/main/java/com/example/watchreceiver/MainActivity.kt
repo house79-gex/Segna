@@ -1,299 +1,176 @@
 package com.example.watchreceiver
 
-import android.content.Context
-import android.content.Intent
-import android.graphics.Color
 import android.os.Bundle
 import android.os.PowerManager
-import android.os.VibrationEffect
-import android.os.Vibrator
+import android.content.Context
 import android.util.Log
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color as ComposeColor
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.wear.compose.material.Text
+import androidx.wear.compose.material.*
+import com.example.watchreceiver.ui.theme.WatchReceiverTheme
 import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
-
+    
     companion object {
         private const val TAG = "MainActivity"
     }
-
-    private var vibrator: Vibrator? = null
-    private var wakeLock: PowerManager.WakeLock? = null
+    
     private var watchServer: WatchServer? = null
-
-    private val letterState = mutableStateOf("")
-    private val colorState = mutableStateOf(Color.BLACK)
-    private val isVibrationMode = mutableStateOf(false)
-
+    private var wakeLock: PowerManager.WakeLock? = null
+    
+    // Stato per UI
+    private val _currentLetter = mutableStateOf("?")
+    private val _currentColor = mutableStateOf(Color.Gray)
+    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-
+        
+        Log.d(TAG, "🚀 Avvio applicazione Watch Receiver")
+        
+        // Avvia server HTTP
+        watchServer = WatchServer { message ->
+            handleReceivedMessage(message)
+        }
+        
+        try {
+            watchServer?.start()
+            Log.d(TAG, "✅ Server HTTP avviato su porta 5000")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Errore avvio server: ${e.message}", e)
+        }
+        
+        // Acquisisci WakeLock per mantenere server attivo
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
-            "WatchReceiver::WakeLock"
-        ).apply {
-            acquire()
-        }
-
-        // Start HTTP server (WiFi communication only)
-        watchServer = WatchServer { message ->
-            handleCommand(message)
-        }
-        watchServer?.start()
-        Log.d(TAG, "⌚ Server HTTP watch avviato su porta 5000")
-
+            "WatchReceiver::ServerWakeLock"
+        )
+        wakeLock?.acquire()
+        Log.d(TAG, "🔒 WakeLock acquisito - server rimarrà attivo")
+        
         setContent {
-            WatchReceiverScreen()
+            WatchReceiverTheme {
+                WatchReceiverScreen(
+                    letter = _currentLetter.value,
+                    color = _currentColor.value
+                )
+            }
         }
     }
-
-    override fun onBackPressed() {
-        // Disabled
+    
+    override fun onDestroy() {
+        super.onDestroy()
+        
+        // Ferma server
+        watchServer?.stop()
+        Log.d(TAG, "🛑 Server HTTP fermato")
+        
+        // Rilascia WakeLock
+        wakeLock?.release()
+        Log.d(TAG, "🔓 WakeLock rilasciato")
     }
-
-    private fun handleCommand(message: String) {
+    
+    /**
+     * Gestisce i messaggi ricevuti dal server HTTP
+     */
+    private fun handleReceivedMessage(message: String) {
         try {
-            val jsonObject = JSONObject(message)
-
-            if (jsonObject.optBoolean("closeApp", false)) {
-                Log.d(TAG, "Comando chiusura app ricevuto")
-                wakeLock?.release()
-                finishAndRemoveTask()
+            Log.d(TAG, "📥 Messaggio ricevuto: $message")
+            
+            val json = JSONObject(message)
+            
+            // Controlla se è un comando RESET
+            if (json.has("command") && json.getString("command") == "RESET") {
+                Log.d(TAG, "🔄 Comando RESET ricevuto")
+                resetDisplay()
                 return
             }
-
-            if (jsonObject.has("command") && jsonObject.getString("command") == "RESET") {
-                Log.d(TAG, "Processing RESET command")
+            
+            // Altrimenti gestisci come lettera
+            if (json.has("letter") && json.has("color")) {
+                val letter = json.getString("letter")
+                val colorHex = json.getString("color")
                 
-                val settings = if (jsonObject.has("settings")) {
-                    jsonObject.getJSONObject("settings")
-                } else null
-
-                if (settings != null && settings.has("watch")) {
-                    val watchSettings = settings.getJSONObject("watch")
-                    val vibrationEnabled = watchSettings.optBoolean("vibrationEnabled", false)
-                    val vibrationDuration = watchSettings.optInt("vibrationDuration", 800)
-
-                    if (vibrationEnabled && vibrator?.hasVibrator() == true) {
-                        vibrator?.vibrate(VibrationEffect.createOneShot(
-                            vibrationDuration.toLong(),
-                            VibrationEffect.DEFAULT_AMPLITUDE
-                        ))
-                    }
-                }
-
-                runOnUiThread {
-                    letterState.value = ""
-                    colorState.value = Color.BLACK
-                    isVibrationMode.value = false
-                    Toast.makeText(this, "RESET eseguito", Toast.LENGTH_SHORT).show()
-                }
-
-            } else if (jsonObject.has("letter")) {
-                val letter = jsonObject.getString("letter")
-                val colorHex = jsonObject.getString("color")
-                val color = Color.parseColor(colorHex)
-
-                val settings = if (jsonObject.has("settings")) {
-                    jsonObject.getJSONObject("settings")
-                } else null
-
-                var vibrationMode = false
-                var vibrationPattern = "numeric"
-                var vibrationDuration = 300
-                var vibrationPause = 200
-
-                if (settings != null && settings.has("watch")) {
-                    val watchSettings = settings.getJSONObject("watch")
-                    vibrationMode = watchSettings.optBoolean("vibrationMode", false)
-                    vibrationPattern = watchSettings.optString("vibrationPattern", "numeric")
-                    vibrationDuration = watchSettings.optInt("vibrationDuration", 300)
-                    vibrationPause = watchSettings.optInt("vibrationPause", 200)
-                }
-
-                if (vibrationMode && vibrator?.hasVibrator() == true) {
-                    Log.d(TAG, "Vibration mode activated: $vibrationPattern")
-                    
-                    runOnUiThread {
-                        isVibrationMode.value = true
-                        colorState.value = Color.BLACK
-                        letterState.value = ""
-                    }
-
-                    val pattern: LongArray = when (vibrationPattern) {
-                        "morse" -> {
-                            when (letter) {
-                                "A" -> longArrayOf(0, 100)
-                                "B" -> longArrayOf(0, 100, 100, 100)
-                                "C" -> longArrayOf(0, 500)
-                                "D" -> longArrayOf(0, 500, 100, 100)
-                                "E" -> longArrayOf(0, 100, 100, 500)
-                                else -> longArrayOf(0, vibrationDuration.toLong())
-                            }
-                        }
-                        
-                        "intensity" -> {
-                            when (letter) {
-                                "A" -> longArrayOf(0, 200)
-                                "B" -> longArrayOf(0, 300)
-                                "C" -> longArrayOf(0, 400)
-                                "D" -> longArrayOf(0, 600)
-                                "E" -> longArrayOf(0, 400, 200, 400)
-                                else -> longArrayOf(0, vibrationDuration.toLong())
-                            }
-                        }
-                        
-                        "melodic" -> {
-                            when (letter) {
-                                "A" -> longArrayOf(0, 50, 50, 50)
-                                "B" -> longArrayOf(0, 100, 100, 200, 100, 100)
-                                "C" -> longArrayOf(0, 120, 80, 120)
-                                "D" -> longArrayOf(0, 200, 100, 200, 100, 200)
-                                "E" -> longArrayOf(0, 100, 300, 100)
-                                else -> longArrayOf(0, vibrationDuration.toLong())
-                            }
-                        }
-                        
-                        else -> {
-                            val vibrationCount = when (letter) {
-                                "A" -> 1
-                                "B" -> 2
-                                "C" -> 3
-                                "D" -> 4
-                                "E" -> 5
-                                else -> 1
-                            }
-                            
-                            val patternList = mutableListOf<Long>()
-                            patternList.add(0)
-                            
-                            for (i in 0 until vibrationCount) {
-                                patternList.add(vibrationDuration.toLong())
-                                if (i < vibrationCount - 1) {
-                                    patternList.add(vibrationPause.toLong())
-                                }
-                            }
-                            
-                            patternList.toLongArray()
-                        }
-                    }
-
-                    try {
-                        vibrator?.vibrate(VibrationEffect.createWaveform(pattern, -1))
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Errore vibrazione: ${e.message}")
-                    }
-                    
-                } else {
-                    Log.d(TAG, "Display mode activated")
-                    
-                    runOnUiThread {
-                        isVibrationMode.value = false
-                        letterState.value = letter
-                        colorState.value = color
-                        Toast.makeText(this, "Mostro: $letter", Toast.LENGTH_SHORT).show()
-                    }
-                }
+                Log.d(TAG, "🎨 Lettera ricevuta: $letter, colore: $colorHex")
+                
+                // Converti hex a Color
+                val color = parseColor(colorHex)
+                
+                // Aggiorna UI
+                _currentLetter.value = letter
+                _currentColor.value = color
+                
+                Log.d(TAG, "✅ Display aggiornato: $letter con colore $colorHex")
+            } else {
+                Log.w(TAG, "⚠️ Formato messaggio non valido: mancano 'letter' o 'color'")
             }
+            
         } catch (e: Exception) {
-            Log.e(TAG, "Errore parsing messaggio: ${e.message}")
+            Log.e(TAG, "❌ Errore parsing messaggio: ${e.message}", e)
         }
     }
+    
+    /**
+     * Reset del display
+     */
+    private fun resetDisplay() {
+        _currentLetter.value = "?"
+        _currentColor.value = Color.Gray
+        Log.d(TAG, "🔄 Display resettato")
+    }
+    
+    /**
+     * Converte stringa colore hex (#RRGGBB) in Color
+     */
+    private fun parseColor(hex: String): Color {
+        return try {
+            val cleanHex = hex.removePrefix("#")
+            val colorInt = android.graphics.Color.parseColor("#$cleanHex")
+            Color(colorInt)
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Errore parsing colore: $hex", e)
+            Color.Gray
+        }
+    }
+}
 
-    @Composable
-    fun WatchReceiverScreen() {
-        var offsetX by remember { mutableStateOf(0f) }
-        val swipeThreshold = 300f
-
+/**
+ * UI Composable per Wear OS
+ */
+@Composable
+fun WatchReceiverScreen(
+    letter: String = "?",
+    color: Color = Color.Gray
+) {
+    Scaffold(
+        timeText = {
+            TimeText()
+        }
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(color = ComposeColor(colorState.value))
-                .pointerInput(Unit) {
-                    detectHorizontalDragGestures(
-                        onDragEnd = {
-                            if (offsetX > swipeThreshold) {
-                                val intent = Intent(this@MainActivity, SettingsActivity::class.java)
-                                startActivity(intent)
-                            }
-                            offsetX = 0f
-                        },
-                        onHorizontalDrag = { _, dragAmount ->
-                            offsetX += dragAmount
-                        }
-                    )
-                },
+                .background(Color.Black),
             contentAlignment = Alignment.Center
         ) {
-            if (isVibrationMode.value) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(ComposeColor.Black)
-                )
-            } else if (letterState.value.isNotEmpty()) {
-                Text(
-                    text = letterState.value,
-                    fontSize = 120.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = when (letterState.value) {
-                        "A", "B" -> ComposeColor.Black
-                        else -> ComposeColor.White
-                    }
-                )
-            } else {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Text(
-                        text = "Segna",
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = ComposeColor.White
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "In attesa...",
-                        fontSize = 14.sp,
-                        color = ComposeColor.Gray
-                    )
-                }
-            }
-
-            if (offsetX > 50f) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .padding(end = 16.dp)
-                        .size(48.dp)
-                        .background(
-                            color = ComposeColor.White.copy(alpha = 0.3f),
-                            shape = CircleShape
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(text = "⚙️", fontSize = 24.sp)
-                }
-            }
+            Text(
+                text = letter,
+                fontSize = 80.sp,
+                fontWeight = FontWeight.Bold,
+                color = color,
+                textAlign = TextAlign.Center
+            )
         }
     }
 }
