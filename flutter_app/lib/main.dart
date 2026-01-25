@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'models/settings_model.dart';
 import 'settings_page.dart';
 import 'services/wifi_communication_service.dart';
+import 'services/smartphone_server.dart';
 
 void main() {
   runApp(const MyApp());
@@ -38,7 +39,9 @@ class _ControllerPageState extends State<ControllerPage> {
   
   // WiFi Communication Service
   final WiFiCommunicationService _wifiService = WiFiCommunicationService();
-  final TextEditingController _ipController = TextEditingController(text: '192.168.0.100');
+  final SmartphoneServer _server = SmartphoneServer();
+  final TextEditingController _ipController = TextEditingController(text: '192.168.0.125');
+  String? _smartphoneIp;
 
   bool watchConnected = false;
 
@@ -58,6 +61,16 @@ class _ControllerPageState extends State<ControllerPage> {
     super.initState();
     _loadSettings();
     _connectToWatch();
+    _startServer();
+  }
+
+  Future<void> _startServer() async {
+    final ip = await _server.start();
+    if (mounted) {
+      setState(() {
+        _smartphoneIp = ip;
+      });
+    }
   }
 
   Future<void> _loadSettings() async {
@@ -150,6 +163,9 @@ class _ControllerPageState extends State<ControllerPage> {
       return;
     }
 
+    // Aggiorna stato per watch
+    _server.updateState(letter, data['colorHex'], data['colorName']);
+
     // Invia a Watch via Wear OS Data Layer
     if (watchConnected) {
       final payload = jsonEncode({
@@ -176,6 +192,9 @@ class _ControllerPageState extends State<ControllerPage> {
     if (_wifiService.isConnected) {
       await _wifiService.sendReset(settings!.toResetJson());
     }
+
+    // Reset stato per watch
+    _server.reset();
 
     // Invia a Watch via Wear OS Data Layer
     if (watchConnected) {
@@ -238,6 +257,46 @@ class _ControllerPageState extends State<ControllerPage> {
                 padding: const EdgeInsets.symmetric(horizontal: 16.0),
                 child: Column(
                   children: [
+                    // Mostra IP smartphone per configurare watch
+                    if (_smartphoneIp != null && _smartphoneIp != 'unknown')
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.blue.shade200),
+                        ),
+                        child: Column(
+                          children: [
+                            const Icon(Icons.info_outline, color: Colors.blue, size: 20),
+                            const SizedBox(height: 4),
+                            const Text(
+                              '📱 IP Smartphone (per Watch)',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blue,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            SelectableText(
+                              _smartphoneIp!,
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blue,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Inserisci questo IP nelle impostazioni del Watch',
+                              style: TextStyle(fontSize: 10, color: Colors.grey),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      ),
+                    const SizedBox(height: 12),
                     TextField(
                       controller: _ipController,
                       decoration: const InputDecoration(
@@ -409,6 +468,7 @@ class _ControllerPageState extends State<ControllerPage> {
   @override
   void dispose() {
     _wifiService.disconnect();
+    _server.stop();
     _ipController.dispose();
     super.dispose();
   }

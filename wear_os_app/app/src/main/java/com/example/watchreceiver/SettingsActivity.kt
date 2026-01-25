@@ -77,7 +77,7 @@ fun SettingsScreen(
 
         // ESP32 IP Address
         Text(
-            text = "IP ESP32",
+            text = "IP Smartphone",
             fontSize = 14.sp,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
@@ -86,12 +86,14 @@ fun SettingsScreen(
         OutlinedTextField(
             value = esp32Ip,
             onValueChange = { esp32Ip = it },
-            label = { Text("192.168.0.100", fontSize = 10.sp) },
+            label = { Text("es: 192.168.0.100", fontSize = 10.sp) },
+            placeholder = { Text("192.168.0.100", fontSize = 10.sp) },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp),
             singleLine = true,
-            textStyle = MaterialTheme.typography.bodySmall
+            enabled = true,
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp)
         )
 
         Divider(modifier = Modifier.padding(vertical = 12.dp))
