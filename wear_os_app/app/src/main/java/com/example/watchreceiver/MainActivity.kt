@@ -4,6 +4,7 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.content.Context
 import android.util.Log
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -38,6 +39,13 @@ class MainActivity : ComponentActivity() {
         
         Log.d(TAG, "🚀 Avvio applicazione Watch Receiver")
         
+        // ↓↓↓ KEEP SCREEN ALWAYS ON ↓↓↓
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        window.addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
+        window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
+        window.addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD)
+        Log.d(TAG, "🔒 Schermo forzato sempre acceso")
+        
         // Avvia server HTTP
         watchServer = WatchServer { message ->
             handleReceivedMessage(message)
@@ -50,14 +58,14 @@ class MainActivity : ComponentActivity() {
             Log.e(TAG, "❌ Errore avvio server: ${e.message}", e)
         }
         
-        // Acquisisci WakeLock per mantenere server attivo
+        // Acquisisci WakeLock BRIGHT per mantenere schermo acceso
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,
-            "WatchReceiver::ServerWakeLock"
+            PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+            "WatchReceiver::ScreenWakeLock"
         )
         wakeLock?.acquire()
-        Log.d(TAG, "🔒 WakeLock acquisito - server rimarrà attivo")
+        Log.d(TAG, "🔓 WakeLock BRIGHT acquisito - schermo sempre acceso")
         
         setContent {
             WatchReceiverTheme {
@@ -69,6 +77,13 @@ class MainActivity : ComponentActivity() {
         }
     }
     
+    override fun onResume() {
+        super.onResume()
+        // Forza schermo acceso quando app torna in foreground
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        Log.d(TAG, "▶️ onResume - schermo forzato acceso")
+    }
+    
     override fun onDestroy() {
         super.onDestroy()
         
@@ -77,8 +92,10 @@ class MainActivity : ComponentActivity() {
         Log.d(TAG, "🛑 Server HTTP fermato")
         
         // Rilascia WakeLock
-        wakeLock?.release()
-        Log.d(TAG, "🔓 WakeLock rilasciato")
+        if (wakeLock?.isHeld == true) {
+            wakeLock?.release()
+            Log.d(TAG, "🔓 WakeLock rilasciato")
+        }
     }
     
     /**
@@ -155,7 +172,8 @@ fun WatchReceiverScreen(
 ) {
     Scaffold(
         timeText = {
-            TimeText()
+            // Rimuovi TimeText per evitare overlay orologio
+            // TimeText()
         }
     ) {
         Box(
