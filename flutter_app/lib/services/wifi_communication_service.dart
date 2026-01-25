@@ -11,23 +11,30 @@ class WiFiCommunicationService {
   /// @param ipAddress - Indirizzo IP dell'ESP32 (es: "192.168.0.100")
   /// @return true se la connessione è riuscita
   Future<bool> connect(String ipAddress) async {
-    try {
-      print('🔌 Tentativo connessione a ESP32: $ipAddress');
-      
-      final response = await http
-          .get(Uri.parse('http://$ipAddress/status'))
-          .timeout(const Duration(seconds: 3)); // Reduced timeout for better UX
-      
-      if (response.statusCode == 200) {
-        esp32Ip = ipAddress;
-        isConnected = true;
-        print('✅ Connesso a ESP32: $ipAddress');
-        return true;
-      } else {
-        print('❌ ESP32 risponde con status code: ${response.statusCode}');
+    // Retry logic: max 2 attempts
+    for (int attempt = 1; attempt <= 2; attempt++) {
+      try {
+        print('🔌 Tentativo $attempt/2 connessione ESP32: $ipAddress');
+        
+        final response = await http
+            .get(Uri.parse('http://$ipAddress/status'))
+            .timeout(const Duration(seconds: 10)); // Increased timeout to 10s
+        
+        // Accept HTTP 200 even with HTML body (ESP32 /status returns HTML)
+        if (response.statusCode == 200) {
+          esp32Ip = ipAddress;
+          isConnected = true;
+          print('✅ Connesso a ESP32: $ipAddress');
+          return true;
+        } else {
+          print('❌ ESP32 risponde con status code: ${response.statusCode}');
+        }
+      } catch (e) {
+        print('❌ Tentativo $attempt fallito: $e');
+        if (attempt < 2) {
+          await Future.delayed(const Duration(seconds: 1));
+        }
       }
-    } catch (e) {
-      print('❌ Errore connessione a ESP32: $e');
     }
     
     isConnected = false;
@@ -66,7 +73,7 @@ class WiFiCommunicationService {
         Uri.parse('http://$esp32Ip/send'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(data),
-      ).timeout(const Duration(seconds: 3));
+      ).timeout(const Duration(seconds: 10));
       
       if (response.statusCode == 200) {
         print('✅ Lettera inviata con successo: $letter');
@@ -103,7 +110,7 @@ class WiFiCommunicationService {
         Uri.parse('http://$esp32Ip/send'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(data),
-      ).timeout(const Duration(seconds: 3));
+      ).timeout(const Duration(seconds: 10));
       
       if (response.statusCode == 200) {
         print('✅ RESET inviato con successo');
