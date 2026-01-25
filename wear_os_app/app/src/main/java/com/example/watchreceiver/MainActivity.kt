@@ -1,356 +1,120 @@
 package com.example.watchreceiver
 
-import android.app.NotificationManager
 import android.content.Context
-import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
-import android.view.WindowManager
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color as ComposeColor
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-// Removed: import com.google.android.gms.wearable.MessageClient
-// Removed: import com.google.android.gms.wearable.MessageEvent
-// Removed: import com.google.android.gms.wearable.Wearable
+import androidx.wear.compose.material.Text
+import com.google.android.gms.wearable.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import android.content.Intent
 
-class MainActivity : ComponentActivity() {
-    private var vibrator: Vibrator? = null
-    private var notificationManager: NotificationManager? = null
-    private var wakeLock: PowerManager.WakeLock? = null
-    private lateinit var wifiReceiver: WiFiReceiver
-    private var watchServer: WatchServer? = null
-
-    private val letterState = mutableStateOf("")
-    private val colorState = mutableStateOf(android.graphics.Color.BLACK)
-    private val isVibrationMode = mutableStateOf(false)
-    
-    // Settings
-    private val displayModeState = mutableStateOf("BOTH")
-    private val letterSizeState = mutableStateOf(120)
-    private val colorSizeState = mutableStateOf("FULLSCREEN")
+class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListener {
 
     companion object {
-        private const val TAG = "WatchReceiver"
-        
-        // Amplitude constants for intensity pattern (0-255 range)
-        private const val AMPLITUDE_A = 128  // 50% intensity
-        private const val AMPLITUDE_B = 166  // 65% intensity
-        private const val AMPLITUDE_C = 204  // 80% intensity
-        private const val AMPLITUDE_D = 242  // 95% intensity
-        private const val AMPLITUDE_E = 255  // 100% intensity
+        private const val TAG = "MainActivity"
+        private const val MESSAGE_PATH = "/segna_channel"
     }
+
+    private lateinit var messageClient: MessageClient
+    private var vibrator: Vibrator? = null
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiReceiver: WiFiReceiver? = null
+    private var watchServer: WatchServer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Keep screen on
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        
-        // Acquire wakelock to keep app active
-        // Using timeout to prevent battery drain if app crashes
+        // Initialize Message Client
+        messageClient = Wearable.getMessageClient(this)
+        messageClient.addListener(this)
+
+        // Initialize Vibrator
+        vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+
+        // Acquire wake lock to keep app active
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "WatchReceiver::WakeLock"
         ).apply {
-            acquire(10*60*1000L /*10 minutes*/)
+            acquire()
         }
 
-        vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-        notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        
-        // Initialize WiFi Receiver (kept for backwards compatibility with old smartphone versions)
-        wifiReceiver = WiFiReceiver(this) { message ->
+        // Start Watch HTTP Server
+        watchServer = WatchServer { message ->
             handleCommand(message)
         }
-        
-        // Initialize Watch Server (new push mechanism - primary communication method)
-        watchServer = WatchServer { command ->
-            handleCommand(command)
-        }
-        
-        try {
-            watchServer?.start()
-            android.util.Log.d(TAG, "✅ WatchServer avviato su porta 5000")
-            Toast.makeText(this, "WatchServer avviato - pronto per comandi", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            android.util.Log.e(TAG, "❌ Errore avvio WatchServer: ${e.message}")
-            Toast.makeText(this, "Errore avvio server: ${e.message}", Toast.LENGTH_LONG).show()
-        }
-        
-        android.util.Log.d(TAG, "Watch pronto per ricevere comandi via WiFi")
-        
-        // Load settings
-        loadSettings()
+        watchServer?.start(5000)
+        Log.d(TAG, "Server HTTP watch avviato")
 
+        // Load saved ESP32 IP from settings
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        val esp32Ip = prefs.getString("esp32_ip", "192.168.0.100") ?: "192.168.0.100"
+
+        // Initialize WiFi Receiver for polling
+        wifiReceiver = WiFiReceiver(esp32Ip) { letter, color ->
+            runOnUiThread {
+                handleLetterReceived(letter, color)
+            }
+        }
+        wifiReceiver?.startPolling()
+
+        // Compose UI
         setContent {
-            WatchDisplay(
-                letter = letterState.value,
-                androidColor = colorState.value,
-                isVibrationMode = isVibrationMode.value,
-                displayMode = displayModeState.value,
-                letterSize = letterSizeState.value,
-                colorSize = colorSizeState.value,
-                onSettingsClick = { openSettings() }
-            )
+            WatchReceiverScreen()
         }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        // Cancel all notifications when app is in foreground
-        notificationManager?.cancelAll()
-        // Reload settings in case they changed
-        loadSettings()
-        
-        // Re-acquire wakelock if it expired
-        if (wakeLock?.isHeld == false) {
-            wakeLock?.acquire(10*60*1000L /*10 minutes*/)
-            android.util.Log.d(TAG, "Wakelock re-acquired")
-        }
-    }
-
-    override fun onPause() {
-        super.onPause()
-        // Keep WiFi receiver active in background for polling
     }
 
     override fun onDestroy() {
-        wakeLock?.release()
-        wifiReceiver.disconnect()
-        watchServer?.stop()
         super.onDestroy()
+        wakeLock?.release()
+        wifiReceiver?.stopPolling()
+        watchServer?.stop()
+        Wearable.getMessageClient(this).removeListener(this)
     }
 
-    // Override back button to prevent accidental closure
-    @Suppress("DEPRECATION")
     override fun onBackPressed() {
-        // Do nothing - app stays open
-        // Only remote command from smartphone can close it
-        android.util.Log.d(TAG, "Back button pressed - ignoring to keep app active")
+        // Disable back button to prevent accidental app closure
+        // App can only be closed via remote command or manual force stop
     }
 
-    // Removed: onMessageReceived (now handled by WiFiReceiver callback)
-    
-    private fun loadSettings() {
-        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-        displayModeState.value = prefs.getString("display_mode", "BOTH") ?: "BOTH"
-        letterSizeState.value = prefs.getInt("letter_size", 120)
-        colorSizeState.value = prefs.getString("color_size", "FULLSCREEN") ?: "FULLSCREEN"
+    override fun onMessageReceived(messageEvent: MessageEvent) {
+        if (messageEvent.path == MESSAGE_PATH) {
+            val message = String(messageEvent.data, Charsets.UTF_8)
+            Log.d(TAG, "📨 Messaggio ricevuto via Wear OS: $message")
+            handleCommand(message)
+        }
     }
 
-    private fun openSettings() {
-        val intent = Intent(this, SettingsActivity::class.java)
-        startActivity(intent)
-    }
-    
-    /**
-     * Esegue pattern di vibrazione avanzati in base al tipo selezionato
-     * 
-     * @param letter Lettera da A a E (valori validi: "A", "B", "C", "D", "E")
-     * @param pattern Tipo di pattern: numeric, morse, intensity, melodic
-     * @param duration Durata base della vibrazione in ms
-     * @param pause Pausa tra vibrazioni in ms
-     * @throws IllegalStateException se vibrator non è disponibile
-     * 
-     * Nota: Tutte le vibrazioni usano coroutine su Dispatchers.Main per garantire
-     * l'esecuzione sul thread UI richiesto dall'API Vibrator Android
-     * 
-     * Se letter non è valido (A-E), verrà usato il pattern per "A" come fallback
-     */
-    private suspend fun executeVibrationPattern(
-        letter: String,
-        pattern: String,
-        duration: Long,
-        pause: Long
-    ) {
-        // Validate letter input
-        if (letter !in listOf("A", "B", "C", "D", "E")) {
-            android.util.Log.w(TAG, "Invalid letter '$letter', using 'A' as fallback")
-        }
-        
-        when (pattern) {
-            "numeric" -> executeNumericPattern(letter, duration, pause)
-            "morse" -> executeMorsePattern(letter, duration, pause)
-            "intensity" -> executeIntensityPattern(letter, duration)
-            "melodic" -> executeMelodicPattern(letter, duration, pause)
-            else -> executeNumericPattern(letter, duration, pause)
-        }
-    }
-    
-    /**
-     * Pattern Numerico: A=1, B=2, C=3, D=4, E=5 vibrazioni
-     */
-    private suspend fun executeNumericPattern(letter: String, duration: Long, pause: Long) {
-        val count = when (letter) {
-            "A" -> 1
-            "B" -> 2
-            "C" -> 3
-            "D" -> 4
-            "E" -> 5
-            else -> 1
-        }
-        
-        for (i in 0 until count) {
-            vibrator?.vibrate(VibrationEffect.createOneShot(duration, VibrationEffect.DEFAULT_AMPLITUDE))
-            if (i < count - 1) {
-                delay(pause)
-            }
-        }
-    }
-    
-    /**
-     * Pattern Morse: Corta/lunga distintivi
-     * A: ·−    (corta-lunga)
-     * B: −···  (lunga-corta-corta-corta)
-     * C: −·−·  (lunga-corta-lunga-corta)
-     * D: −··   (lunga-corta-corta)
-     * E: ·     (corta)
-     */
-    private suspend fun executeMorsePattern(letter: String, duration: Long, pause: Long) {
-        val shortDuration = duration
-        val longDuration = duration * 3
-        val pattern = when (letter) {
-            "A" -> listOf(shortDuration, longDuration)
-            "B" -> listOf(longDuration, shortDuration, shortDuration, shortDuration)
-            "C" -> listOf(longDuration, shortDuration, longDuration, shortDuration)
-            "D" -> listOf(longDuration, shortDuration, shortDuration)
-            "E" -> listOf(shortDuration)
-            else -> listOf(shortDuration)
-        }
-        
-        pattern.forEachIndexed { index, vibDuration ->
-            vibrator?.vibrate(VibrationEffect.createOneShot(vibDuration, VibrationEffect.DEFAULT_AMPLITUDE))
-            if (index < pattern.size - 1) {
-                delay(pause)
-            }
-        }
-    }
-    
-    /**
-     * Pattern Intensità: Forza crescente A→E
-     * A: 50% intensità
-     * B: 65% intensità
-     * C: 80% intensità
-     * D: 95% intensità
-     * E: 100% intensità
-     */
-    private suspend fun executeIntensityPattern(letter: String, duration: Long) {
-        val amplitude = when (letter) {
-            "A" -> AMPLITUDE_A
-            "B" -> AMPLITUDE_B
-            "C" -> AMPLITUDE_C
-            "D" -> AMPLITUDE_D
-            "E" -> AMPLITUDE_E
-            else -> AMPLITUDE_E
-        }
-        
-        vibrator?.vibrate(VibrationEffect.createOneShot(duration * 2, amplitude))
-    }
-    
-    /**
-     * Pattern Melodico: Pattern ritmici unici per ogni lettera
-     * A: Ritmo semplice (·-·)
-     * B: Ritmo doppio (··-··)
-     * C: Ritmo triplo (···-···)
-     * D: Ritmo sincopato (·--·)
-     * E: Ritmo veloce (····)
-     */
-    private suspend fun executeMelodicPattern(letter: String, duration: Long, pause: Long) {
-        val shortPause = pause / 2
-        val patterns = when (letter) {
-            "A" -> listOf(
-                Triple(duration, pause, VibrationEffect.DEFAULT_AMPLITUDE),
-                Triple(duration * 2, pause, VibrationEffect.DEFAULT_AMPLITUDE),
-                Triple(duration, 0, VibrationEffect.DEFAULT_AMPLITUDE)
-            )
-            "B" -> listOf(
-                Triple(duration, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
-                Triple(duration, pause, VibrationEffect.DEFAULT_AMPLITUDE),
-                Triple(duration * 2, pause, VibrationEffect.DEFAULT_AMPLITUDE),
-                Triple(duration, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
-                Triple(duration, 0, VibrationEffect.DEFAULT_AMPLITUDE)
-            )
-            "C" -> listOf(
-                Triple(duration, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
-                Triple(duration, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
-                Triple(duration, pause, VibrationEffect.DEFAULT_AMPLITUDE),
-                Triple(duration * 2, pause, VibrationEffect.DEFAULT_AMPLITUDE),
-                Triple(duration, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
-                Triple(duration, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
-                Triple(duration, 0, VibrationEffect.DEFAULT_AMPLITUDE)
-            )
-            "D" -> listOf(
-                Triple(duration, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
-                Triple(duration * 2, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
-                Triple(duration * 2, pause, VibrationEffect.DEFAULT_AMPLITUDE),
-                Triple(duration, 0, VibrationEffect.DEFAULT_AMPLITUDE)
-            )
-            "E" -> listOf(
-                Triple(duration / 2, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
-                Triple(duration / 2, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
-                Triple(duration / 2, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
-                Triple(duration / 2, 0, VibrationEffect.DEFAULT_AMPLITUDE)
-            )
-            else -> listOf(Triple(duration, 0, VibrationEffect.DEFAULT_AMPLITUDE))
-        }
-        
-        patterns.forEach { (vibDuration, delayTime, amplitude) ->
-            vibrator?.vibrate(VibrationEffect.createOneShot(vibDuration, amplitude))
-            if (delayTime > 0) {
-                delay(delayTime)
-            }
-        }
-    }
-    
-    private fun handleCommand(json: String) {
+    private fun handleCommand(message: String) {
         try {
-            val jsonObject = JSONObject(json)
-            
-            android.util.Log.d(TAG, "Parsing JSON: $json")
-            
-            // ⭐ Toast per parsing
-            runOnUiThread {
-                val letter = jsonObject.optString("letter", "?")
-                Toast.makeText(
-                    this, 
-                    "Parsing lettera: $letter", 
-                    Toast.LENGTH_LONG
-                ).show()
-            }
+            val jsonObject = JSONObject(message)
 
-            // Handle close app command
+            // Check for close app command
             if (jsonObject.optBoolean("closeApp", false)) {
-                android.util.Log.d(TAG, "Received closeApp command")
+                Log.d(TAG, "Comando chiusura app ricevuto")
                 wakeLock?.release()
                 finishAndRemoveTask()
                 return
@@ -382,7 +146,6 @@ class MainActivity : ComponentActivity() {
                     colorState.value = android.graphics.Color.BLACK
                     isVibrationMode.value = false
                     
-                    // ⭐ Toast RESET
                     Toast.makeText(this, "RESET eseguito", Toast.LENGTH_SHORT).show()
                 }
 
@@ -397,47 +160,106 @@ class MainActivity : ComponentActivity() {
                 } else null
 
                 var vibrationMode = false
+                var vibrationPattern = "numeric"
                 var vibrationDuration = 300
                 var vibrationPause = 200
-                var vibrationPattern = "numeric"
 
                 if (settings != null && settings.has("watch")) {
                     val watchSettings = settings.getJSONObject("watch")
                     vibrationMode = watchSettings.optBoolean("vibrationMode", false)
+                    vibrationPattern = watchSettings.optString("vibrationPattern", "numeric")
                     vibrationDuration = watchSettings.optInt("vibrationDuration", 300)
                     vibrationPause = watchSettings.optInt("vibrationPause", 200)
-                    vibrationPattern = watchSettings.optString("vibrationPattern", "numeric")
                 }
 
                 if (vibrationMode && vibrator?.hasVibrator() == true) {
-                    android.util.Log.d(TAG, "Vibration mode activated with pattern: $vibrationPattern")
+                    android.util.Log.d(TAG, "Vibration mode activated")
                     
-                    // Modalità vibrazione: schermo nero + vibrazioni
+                    // Modalità vibrazione: schermo nero
                     runOnUiThread {
                         isVibrationMode.value = true
                         colorState.value = android.graphics.Color.BLACK
                         letterState.value = ""
                     }
 
-                    // Esegui vibrazioni in base al pattern selezionato
-                    CoroutineScope(Dispatchers.Main).launch {
-                        executeVibrationPattern(
-                            letter,
-                            vibrationPattern,
-                            vibrationDuration.toLong(),
-                            vibrationPause.toLong()
-                        )
+                    android.util.Log.d(TAG, "Pattern vibrazione: $vibrationPattern")
+
+                    // Costruisci pattern vibrazioni
+                    val pattern: LongArray = when (vibrationPattern) {
+                        "morse" -> {
+                            when (letter) {
+                                "A" -> longArrayOf(0, 100)
+                                "B" -> longArrayOf(0, 100, 100, 100)
+                                "C" -> longArrayOf(0, 500)
+                                "D" -> longArrayOf(0, 500, 100, 100)
+                                "E" -> longArrayOf(0, 100, 100, 500)
+                                else -> longArrayOf(0, vibrationDuration.toLong())
+                            }
+                        }
+                        
+                        "intensity" -> {
+                            when (letter) {
+                                "A" -> longArrayOf(0, 200)
+                                "B" -> longArrayOf(0, 300)
+                                "C" -> longArrayOf(0, 400)
+                                "D" -> longArrayOf(0, 600)
+                                "E" -> longArrayOf(0, 400, 200, 400)
+                                else -> longArrayOf(0, vibrationDuration.toLong())
+                            }
+                        }
+                        
+                        "melodic" -> {
+                            when (letter) {
+                                "A" -> longArrayOf(0, 50, 50, 50)
+                                "B" -> longArrayOf(0, 100, 100, 200, 100, 100)
+                                "C" -> longArrayOf(0, 120, 80, 120)
+                                "D" -> longArrayOf(0, 200, 100, 200, 100, 200)
+                                "E" -> longArrayOf(0, 100, 300, 100)
+                                else -> longArrayOf(0, vibrationDuration.toLong())
+                            }
+                        }
+                        
+                        else -> {
+                            // "numeric" (default)
+                            val vibrationCount = when (letter) {
+                                "A" -> 1
+                                "B" -> 2
+                                "C" -> 3
+                                "D" -> 4
+                                "E" -> 5
+                                else -> 1
+                            }
+                            
+                            val patternList = mutableListOf<Long>()
+                            patternList.add(0)
+                            
+                            for (i in 0 until vibrationCount) {
+                                patternList.add(vibrationDuration.toLong())
+                                if (i < vibrationCount - 1) {
+                                    patternList.add(vibrationPause.toLong())
+                                }
+                            }
+                            
+                            patternList.toLongArray()
+                        }
                     }
+
+                    // Esegui vibrazione
+                    try {
+                        vibrator?.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                    } catch (e: Exception) {
+                        android.util.Log.e(TAG, "Errore vibrazione: ${e.message}")
+                    }
+                    
                 } else {
+                    // Modalità display normale
                     android.util.Log.d(TAG, "Display mode activated")
                     
-                    // Modalità display: lettera e colore
                     runOnUiThread {
                         isVibrationMode.value = false
                         letterState.value = letter
                         colorState.value = color
                         
-                        // ⭐ Toast prima di mostrare lettera
                         Toast.makeText(
                             this, 
                             "Mostro: $letter", 
@@ -447,108 +269,118 @@ class MainActivity : ComponentActivity() {
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.e(TAG, "Error parsing message", e)
-            
-            // ⭐ Toast errore
-            runOnUiThread {
-                Toast.makeText(
-                    this, 
-                    "ERRORE: ${e.message}", 
-                    Toast.LENGTH_LONG
-                ).show()
-            }
+            Log.e(TAG, "❌ Errore parsing messaggio: ${e.message}")
         }
     }
-}
 
-@Composable
-fun WatchDisplay(
-    letter: String,
-    androidColor: Int,
-    isVibrationMode: Boolean,
-    displayMode: String,
-    letterSize: Int,
-    colorSize: String,
-    onSettingsClick: () -> Unit
-) {
-    // Determine what to show based on display mode
-    val showLetter = !isVibrationMode && letter.isNotEmpty() && 
-                     (displayMode == "BOTH" || displayMode == "LETTER_ONLY")
-    val showColor = !isVibrationMode && (displayMode == "BOTH" || displayMode == "COLOR_ONLY")
-
-    val backgroundColor = if (isVibrationMode) {
-        ComposeColor.Black
-    } else if (displayMode == "LETTER_ONLY") {
-        ComposeColor.Black
-    } else if (showColor) {
-        ComposeColor(
-            red = android.graphics.Color.red(androidColor) / 255f,
-            green = android.graphics.Color.green(androidColor) / 255f,
-            blue = android.graphics.Color.blue(androidColor) / 255f,
-            alpha = 1f
-        )
-    } else {
-        ComposeColor.Black
+    private fun handleLetterReceived(letter: String, colorHex: String) {
+        try {
+            val color = Color.parseColor(colorHex)
+            letterState.value = letter
+            colorState.value = color
+            isVibrationMode.value = false
+            
+            Toast.makeText(
+                this,
+                "Ricevuto via WiFi: $letter",
+                Toast.LENGTH_SHORT
+            ).show()
+        } catch (e: Exception) {
+            Log.e(TAG, "Errore conversione colore: ${e.message}")
+        }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                if (colorSize == "FULLSCREEN" || displayMode == "LETTER_ONLY" || isVibrationMode) {
-                    backgroundColor
-                } else {
-                    ComposeColor.Black
-                }
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        // Show colored circle if not fullscreen
-        if (showColor && colorSize != "FULLSCREEN") {
-            val radius = when (colorSize) {
-                "CIRCLE_LARGE" -> 150.dp
-                "CIRCLE_MEDIUM" -> 100.dp
-                "CIRCLE_SMALL" -> 50.dp
-                else -> 100.dp
-            }
-            
-            Box(
-                modifier = Modifier
-                    .size(radius * 2)
-                    .clip(CircleShape)
-                    .background(backgroundColor)
-            )
-        }
+    // Compose State
+    private val letterState = mutableStateOf("")
+    private val colorState = mutableStateOf(Color.BLACK)
+    private val isVibrationMode = mutableStateOf(false)
 
-        // Show letter if needed
-        if (showLetter) {
-            Text(
-                text = letter,
-                fontSize = letterSize.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (androidColor == android.graphics.Color.WHITE ||
-                    androidColor == android.graphics.Color.YELLOW ||
-                    androidColor == android.graphics.Color.GREEN
-                ) {
-                    ComposeColor.Black
-                } else {
-                    ComposeColor.White
-                }
-            )
-        }
+    @Composable
+    fun WatchReceiverScreen() {
+        var offsetX by remember { mutableStateOf(0f) }
+        val swipeThreshold = 300f
 
-        // Settings button in top-right corner
-        IconButton(
-            onClick = onSettingsClick,
+        Box(
             modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(8.dp)
+                .fillMaxSize()
+                .background(
+                    color = ComposeColor(colorState.value)
+                )
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            if (offsetX > swipeThreshold) {
+                                // Swipe right → Settings
+                                val intent = Intent(this@MainActivity, SettingsActivity::class.java)
+                                startActivity(intent)
+                            }
+                            offsetX = 0f
+                        },
+                        onHorizontalDrag = { _, dragAmount ->
+                            offsetX += dragAmount
+                        }
+                    )
+                },
+            contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Default.Settings,
-                contentDescription = "Impostazioni",
-                tint = ComposeColor.White
-            )
+            if (isVibrationMode.value) {
+                // Modalità vibrazione: schermo nero senza testo
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(ComposeColor.Black)
+                )
+            } else if (letterState.value.isNotEmpty()) {
+                // Modalità display: mostra lettera
+                Text(
+                    text = letterState.value,
+                    fontSize = 120.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = when (letterState.value) {
+                        "A", "B" -> ComposeColor.Black
+                        else -> ComposeColor.White
+                    }
+                )
+            } else {
+                // Stato iniziale: schermo nero
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "Segna",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = ComposeColor.White
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "In attesa...",
+                        fontSize = 14.sp,
+                        color = ComposeColor.Gray
+                    )
+                }
+            }
+
+            // Indicatore swipe per impostazioni
+            if (offsetX > 50f) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(end = 16.dp)
+                        .size(48.dp)
+                        .background(
+                            color = ComposeColor.White.copy(alpha = 0.3f),
+                            shape = CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "⚙️",
+                        fontSize = 24.sp
+                    )
+                }
+            }
         }
     }
 }
