@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.*
 import org.json.JSONObject
@@ -35,13 +36,14 @@ class MainActivity : ComponentActivity() {
     private val _currentLetter = mutableStateOf("?")
     private val _currentColor = mutableStateOf(Color.Gray)
     private val _isDisplayMode = mutableStateOf(true)
+    private val _fontSize = mutableStateOf(80)
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
         Log.d(TAG, "🚀 Avvio Watch Receiver")
         
-        // Schermo sempre acceso (solo window flags, no BRIGHT_WAKE_LOCK)
+        // Schermo sempre acceso
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
         window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
@@ -58,12 +60,12 @@ class MainActivity : ComponentActivity() {
         
         try {
             watchServer?.start()
-            Log.d(TAG, "✅ Server HTTP avviato su porta 5000")
+            Log.d(TAG, "⌚ Server HTTP watch avviato su porta 5000")
         } catch (e: Exception) {
             Log.e(TAG, "❌ Errore avvio server: ${e.message}", e)
         }
         
-        // WakeLock PARTIAL (leggero, solo per server)
+        // WakeLock PARTIAL
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
@@ -73,10 +75,14 @@ class MainActivity : ComponentActivity() {
         Log.d(TAG, "🔓 WakeLock PARTIAL acquisito")
         
         setContent {
-            WatchReceiverScreen(
+            WatchReceiverApp(
                 letter = _currentLetter.value,
                 color = _currentColor.value,
-                isDisplayMode = _isDisplayMode.value
+                isDisplayMode = _isDisplayMode.value,
+                fontSize = _fontSize.value,
+                onFontSizeChange = { newSize ->
+                    _fontSize.value = newSize
+                }
             )
         }
     }
@@ -98,13 +104,13 @@ class MainActivity : ComponentActivity() {
     
     private fun handleReceivedMessage(message: String) {
         try {
-            Log.d(TAG, "📥 Messaggio: $message")
+            Log.d(TAG, "📥 Messaggio ricevuto: $message")
             
             val json = JSONObject(message)
             
             // Comando RESET
             if (json.has("command") && json.getString("command") == "RESET") {
-                Log.d(TAG, "🔄 RESET")
+                Log.d(TAG, "Processing RESET command")
                 handleReset(json)
                 return
             }
@@ -114,8 +120,6 @@ class MainActivity : ComponentActivity() {
                 val letter = json.getString("letter")
                 val colorHex = json.getString("color")
                 
-                Log.d(TAG, "🎨 $letter - $colorHex")
-                
                 // Leggi settings
                 val settings = if (json.has("settings")) {
                     json.getJSONObject("settings").getJSONObject("watch")
@@ -124,20 +128,20 @@ class MainActivity : ComponentActivity() {
                 val vibrationMode = settings?.optBoolean("vibrationMode", false) ?: false
                 
                 if (vibrationMode) {
-                    // Modalità vibrazione
+                    // Modalità vibrazione SOLO
+                    Log.d(TAG, "Vibration mode activated: ${settings?.optString("vibrationPattern", "numeric")}")
                     _isDisplayMode.value = false
                     handleVibration(letter, settings)
-                    Log.d(TAG, "📳 Vibration mode activated")
                 } else {
-                    // Modalità display
+                    // Modalità display SOLO
+                    Log.d(TAG, "Display mode activated")
                     _isDisplayMode.value = true
                     _currentLetter.value = letter
                     _currentColor.value = parseColor(colorHex)
-                    Log.d(TAG, "📺 Display mode activated")
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Errore: ${e.message}", e)
+            Log.e(TAG, "❌ Errore parsing messaggio: ${e.message}", e)
         }
     }
     
@@ -146,7 +150,7 @@ class MainActivity : ComponentActivity() {
         _currentColor.value = Color.Gray
         _isDisplayMode.value = true
         
-        // Vibrazione reset (lunga)
+        // Vibrazione reset
         try {
             val settings = if (json.has("settings")) {
                 json.getJSONObject("settings").getJSONObject("watch")
@@ -193,22 +197,22 @@ class MainActivity : ComponentActivity() {
                 }
             } else {
                 // Pattern numerico
-                val pattern = mutableListOf<Long>()
-                pattern.add(0) // Delay iniziale
+                val patternList = mutableListOf<Long>()
+                patternList.add(0) // Delay iniziale
                 repeat(count) {
-                    pattern.add(duration.toLong())
+                    patternList.add(duration.toLong())
                     if (it < count - 1) {
-                        pattern.add(pause.toLong())
+                        patternList.add(pause.toLong())
                     }
                 }
-                pattern.toLongArray()
+                patternList.toLongArray()
             }
             
             vibrator?.vibrate(
                 VibrationEffect.createWaveform(timings, -1)
             )
             
-            Log.d(TAG, "📳 Vibrazione $pattern: $letter ($count volte)")
+            Log.d(TAG, "📳 Vibrazione $pattern: $letter ($count volte, ${duration}ms)")
         } catch (e: Exception) {
             Log.e(TAG, "❌ Errore vibrazione: ${e.message}", e)
         }
@@ -220,17 +224,22 @@ class MainActivity : ComponentActivity() {
             val colorInt = android.graphics.Color.parseColor("#$cleanHex")
             Color(colorInt)
         } catch (e: Exception) {
+            Log.e(TAG, "❌ Errore parsing colore: $hex", e)
             Color.Gray
         }
     }
 }
 
 @Composable
-fun WatchReceiverScreen(
-    letter: String = "?",
-    color: Color = Color.Gray,
-    isDisplayMode: Boolean = true
+fun WatchReceiverApp(
+    letter: String,
+    color: Color,
+    isDisplayMode: Boolean,
+    fontSize: Int,
+    onFontSizeChange: (Int) -> Unit
 ) {
+    var showMenu by remember { mutableStateOf(false) }
+    
     Scaffold(
         timeText = { }
     ) {
@@ -241,16 +250,53 @@ fun WatchReceiverScreen(
             contentAlignment = Alignment.Center
         ) {
             if (isDisplayMode) {
-                // Modalità display: mostra lettera colorata
-                Text(
-                    text = letter,
-                    fontSize = 80.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = color,
-                    textAlign = TextAlign.Center
-                )
+                // Modalità display
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = letter,
+                        fontSize = fontSize.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = color,
+                        textAlign = TextAlign.Center
+                    )
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // Pulsanti dimensione font
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { 
+                                if (fontSize > 40) onFontSizeChange(fontSize - 10)
+                            },
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Text("-", fontSize = 20.sp)
+                        }
+                        
+                        Text(
+                            text = "${fontSize}sp",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            modifier = Modifier.align(Alignment.CenterVertically)
+                        )
+                        
+                        Button(
+                            onClick = { 
+                                if (fontSize < 120) onFontSizeChange(fontSize + 10)
+                            },
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Text("+", fontSize = 20.sp)
+                        }
+                    }
+                }
             } else {
-                // Modalità vibrazione: schermo nero
+                // Modalità vibrazione: solo icona
                 Text(
                     text = "📳",
                     fontSize = 60.sp,
