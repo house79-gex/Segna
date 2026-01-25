@@ -34,12 +34,14 @@ class ControllerPage extends StatefulWidget {
 }
 
 class _ControllerPageState extends State<ControllerPage> {
-  // Platform channel for Wear OS communication (kept for watch communication)
+  // Platform channel for Wear OS communication (kept for Bluetooth fallback)
   static const platform = MethodChannel('com.example.segna/wear');
   
   // WiFi Communication Services
   final WiFiCommunicationService _wifiService = WiFiCommunicationService();
   final WatchWiFiService _watchWifiService = WatchWiFiService();
+  
+  // IP Controllers
   final TextEditingController _ipController = TextEditingController(text: '192.168.0.125');
   final TextEditingController _watchIpController = TextEditingController(text: '192.168.0.124');
 
@@ -60,7 +62,7 @@ class _ControllerPageState extends State<ControllerPage> {
   void initState() {
     super.initState();
     _loadSettings();
-    _connectToWatch();
+    _connectToWatchBluetooth();
   }
 
   Future<void> _loadSettings() async {
@@ -82,18 +84,18 @@ class _ControllerPageState extends State<ControllerPage> {
     }
   }
 
-  // Connect to Wear OS watch via platform channel
-  Future<void> _connectToWatch() async {
+  // Connect to Wear OS watch via Bluetooth platform channel
+  Future<void> _connectToWatchBluetooth() async {
     try {
       final result = await platform.invokeMethod('connectToWatch');
       setState(() {
         watchConnected = result == true;
       });
       if (watchConnected) {
-        _showMessage('Watch connesso via Wear OS');
+        _showMessage('Watch connesso via Bluetooth Wear OS');
       }
     } catch (e) {
-      print('Error connecting to watch: $e');
+      print('Error connecting to watch Bluetooth: $e');
       setState(() {
         watchConnected = false;
       });
@@ -128,34 +130,30 @@ class _ControllerPageState extends State<ControllerPage> {
   }
 
   // Connetti a Watch via WiFi
-  Future<void> _connectToWatch() async {
+  Future<void> _connectToWatchWiFi() async {
     final ip = _watchIpController.text.trim();
     if (ip.isEmpty) {
-      _showError('⚠️ Inserisci un indirizzo IP valido per il Watch');
+      _showError('⚠️ Inserisci IP Watch valido');
       return;
     }
 
-    _showMessage('🔌 Connessione a Watch...');
+    _showMessage('🔌 Connessione a Watch WiFi...');
     
     final success = await _watchWifiService.connect(ip);
-    setState(() {
-      watchConnected = success;
-    });
+    setState(() {});
     
     if (success) {
-      _showMessage('✅ Connesso a Watch: $ip');
+      _showMessage('✅ Connesso a Watch WiFi: $ip');
     } else {
-      _showError('❌ Impossibile connettersi a Watch');
+      _showError('❌ Impossibile connettersi a Watch WiFi');
     }
   }
 
-  // Disconnetti da Watch
-  void _disconnectFromWatch() {
+  // Disconnetti da Watch WiFi
+  void _disconnectFromWatchWiFi() {
     _watchWifiService.disconnect();
-    setState(() {
-      watchConnected = false;
-    });
-    _showMessage('🔌 Disconnesso da Watch');
+    setState(() {});
+    _showMessage('🔌 Disconnesso da Watch WiFi');
   }
 
   Future<void> _sendCommand(String letter) async {
@@ -164,30 +162,27 @@ class _ControllerPageState extends State<ControllerPage> {
       return;
     }
 
-    if (!_wifiService.isConnected) {
-      _showError('⚠️ Non connesso a ESP32. Connetti prima di inviare comandi.');
-      return;
-    }
-
     final data = letterData[letter]!;
+    bool esp32Success = false;
+    bool watchSuccess = false;
     
     // Invia a ESP32 via WiFi
-    final success = await _wifiService.sendLetter(
-      letter, 
-      data['colorHex'],
-      data['colorName'],
-      settings!.toJson()
-    );
-
-    if (!success) {
-      _showError('❌ Errore invio a ESP32');
-      return;
+    if (_wifiService.isConnected) {
+      esp32Success = await _wifiService.sendLetter(
+        letter, 
+        data['colorHex'],
+        data['colorName'],
+        settings!.toJson()
+      );
+      
+      if (!esp32Success) {
+        _showError('❌ Errore invio a ESP32');
+      }
     }
 
-    // Invia a Watch via WiFi (con fallback Bluetooth)
-    if (watchConnected && _watchWifiService.isConnected) {
-      // Prova WiFi prima
-      final watchSuccess = await _watchWifiService.sendCommand(
+    // Invia a Watch via WiFi
+    if (_watchWifiService.isConnected) {
+      watchSuccess = await _watchWifiService.sendLetter(
         letter,
         data['colorHex'],
         data['colorName'],
@@ -195,23 +190,26 @@ class _ControllerPageState extends State<ControllerPage> {
       );
       
       if (!watchSuccess) {
-        // Fallback a Bluetooth (Wear OS Data Layer) se WiFi fallisce
-        print('⚠️ WiFi Watch fallito, provo Bluetooth...');
-        try {
-          final payload = jsonEncode({
-            'letter': letter,
-            'color': data['colorHex'],
-            'colorName': data['colorName'],
-            'settings': settings!.toJson(),
-          });
-          await platform.invokeMethod('sendMessage', {'message': payload});
-          print('✅ Inviato a Watch via Bluetooth');
-        } catch (e) {
-          _showError('⚠️ Errore invio Watch (WiFi + Bluetooth): $e');
+        // Fallback: prova Bluetooth Wear OS
+        if (watchConnected) {
+          try {
+            final payload = jsonEncode({
+              'letter': letter,
+              'color': data['colorHex'],
+              'colorName': data['colorName'],
+              'settings': settings!.toJson(),
+            });
+            
+            await platform.invokeMethod('sendMessage', {'message': payload});
+            watchSuccess = true;
+            print('✅ Fallback Bluetooth Wear OS riuscito');
+          } catch (e) {
+            print('❌ Errore Bluetooth Wear OS: $e');
+          }
         }
       }
     } else if (watchConnected) {
-      // Solo Bluetooth se Watch non connesso via WiFi
+      // Solo Bluetooth Wear OS disponibile
       try {
         final payload = jsonEncode({
           'letter': letter,
@@ -219,13 +217,24 @@ class _ControllerPageState extends State<ControllerPage> {
           'colorName': data['colorName'],
           'settings': settings!.toJson(),
         });
+        
         await platform.invokeMethod('sendMessage', {'message': payload});
+        watchSuccess = true;
       } catch (e) {
         _showError('⚠️ Errore invio Watch: $e');
       }
     }
 
-    _showMessage('✅ Comando inviato: $letter');
+    // Messaggio risultato
+    if (esp32Success && watchSuccess) {
+      _showMessage('✅ Comando inviato: $letter (ESP32 + Watch)');
+    } else if (esp32Success) {
+      _showMessage('✅ Comando inviato: $letter (solo ESP32)');
+    } else if (watchSuccess) {
+      _showMessage('✅ Comando inviato: $letter (solo Watch)');
+    } else {
+      _showError('❌ Nessun dispositivo disponibile');
+    }
   }
 
   Future<void> _sendReset() async {
@@ -236,29 +245,19 @@ class _ControllerPageState extends State<ControllerPage> {
       await _wifiService.sendReset(settings!.toResetJson());
     }
 
-    // Invia a Watch via WiFi (con fallback Bluetooth)
-    if (watchConnected && _watchWifiService.isConnected) {
-      final watchSuccess = await _watchWifiService.sendReset(settings!.toResetJson());
+    // Invia a Watch via WiFi
+    if (_watchWifiService.isConnected) {
+      await _watchWifiService.sendReset(settings!.toResetJson());
+    }
+
+    // Invia a Watch via Wear OS Data Layer (fallback)
+    if (watchConnected) {
+      final payload = jsonEncode({
+        'command': 'RESET',
+        'settings': settings!.toResetJson(),
+      });
       
-      if (!watchSuccess) {
-        // Fallback a Bluetooth
-        try {
-          final payload = jsonEncode({
-            'command': 'RESET',
-            'settings': settings!.toResetJson(),
-          });
-          await platform.invokeMethod('sendMessage', {'message': payload});
-        } catch (e) {
-          print('Errore invio Watch: $e');
-        }
-      }
-    } else if (watchConnected) {
-      // Solo Bluetooth se Watch non connesso via WiFi
       try {
-        final payload = jsonEncode({
-          'command': 'RESET',
-          'settings': settings!.toResetJson(),
-        });
         await platform.invokeMethod('sendMessage', {'message': payload});
       } catch (e) {
         print('Errore invio Watch: $e');
@@ -307,12 +306,17 @@ class _ControllerPageState extends State<ControllerPage> {
           Column(
             children: [
               const SizedBox(height: 16),
-              // Sezione connessione WiFi
+              
+              // Sezione ESP32
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16.0),
                 child: Column(
                   children: [
-                    // ESP32 Connection
+                    const Text(
+                      '🔌 ESP32',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
                     TextField(
                       controller: _ipController,
                       decoration: const InputDecoration(
@@ -334,8 +338,22 @@ class _ControllerPageState extends State<ControllerPage> {
                         padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
                       ),
                     ),
-                    const SizedBox(height: 16),
-                    // Watch Connection
+                  ],
+                ),
+              ),
+              
+              const Divider(height: 32),
+              
+              // Sezione Watch WiFi
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: Column(
+                  children: [
+                    const Text(
+                      '⌚ Watch WiFi',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
                     TextField(
                       controller: _watchIpController,
                       decoration: const InputDecoration(
@@ -348,11 +366,11 @@ class _ControllerPageState extends State<ControllerPage> {
                     ),
                     const SizedBox(height: 8),
                     ElevatedButton.icon(
-                      onPressed: watchConnected ? _disconnectFromWatch : _connectToWatch,
-                      icon: Icon(watchConnected ? Icons.wifi_off : Icons.wifi),
-                      label: Text(watchConnected ? 'Disconnetti Watch' : 'Connetti Watch'),
+                      onPressed: _watchWifiService.isConnected ? _disconnectFromWatchWiFi : _connectToWatchWiFi,
+                      icon: Icon(_watchWifiService.isConnected ? Icons.wifi_off : Icons.wifi),
+                      label: Text(_watchWifiService.isConnected ? 'Disconnetti Watch' : 'Connetti Watch'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: watchConnected ? Colors.red : Colors.blue,
+                        backgroundColor: _watchWifiService.isConnected ? Colors.red : Colors.blue,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
                       ),
@@ -360,7 +378,9 @@ class _ControllerPageState extends State<ControllerPage> {
                   ],
                 ),
               ),
+              
               const SizedBox(height: 16),
+              
               // Stato dispositivi
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -382,7 +402,7 @@ class _ControllerPageState extends State<ControllerPage> {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          'ESP32 WiFi',
+                          'ESP32',
                           style: TextStyle(
                             color: _wifiService.isConnected ? Colors.green : Colors.grey,
                           ),
@@ -394,7 +414,7 @@ class _ControllerPageState extends State<ControllerPage> {
                   Container(
                     decoration: BoxDecoration(
                       border: Border.all(
-                        color: watchConnected ? Colors.green : Colors.transparent,
+                        color: _watchWifiService.isConnected || watchConnected ? Colors.green : Colors.transparent,
                         width: 3,
                       ),
                       borderRadius: BorderRadius.circular(8),
@@ -404,13 +424,14 @@ class _ControllerPageState extends State<ControllerPage> {
                       children: [
                         Icon(
                           Icons.watch,
-                          color: watchConnected ? Colors.green : Colors.grey,
+                          color: _watchWifiService.isConnected || watchConnected ? Colors.green : Colors.grey,
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          'Watch WiFi',
+                          _watchWifiService.isConnected ? 'Watch WiFi' : (watchConnected ? 'Watch BT' : 'Watch'),
                           style: TextStyle(
-                            color: watchConnected ? Colors.green : Colors.grey,
+                            color: _watchWifiService.isConnected || watchConnected ? Colors.green : Colors.grey,
+                            fontSize: 12,
                           ),
                         ),
                       ],
@@ -419,6 +440,7 @@ class _ControllerPageState extends State<ControllerPage> {
                 ],
               ),
               const SizedBox(height: 8),
+              
               // Close Watch App button
               if (watchConnected)
                 TextButton.icon(
@@ -430,6 +452,7 @@ class _ControllerPageState extends State<ControllerPage> {
                   ),
                 ),
               const SizedBox(height: 8),
+              
               // Pulsanti lettere in colonna centrale
               Expanded(
                 child: SingleChildScrollView(
@@ -480,36 +503,5 @@ class _ControllerPageState extends State<ControllerPage> {
                 backgroundColor: Colors.black,
                 foregroundColor: Colors.white,
                 onPressed: _sendReset,
-                child: const Text(
-                  'Reset',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Color _getColorFromHex(String hexColor) {
-    hexColor = hexColor.replaceAll('#', '');
-    if (hexColor.length == 6) {
-      hexColor = 'FF$hexColor';
-    }
-    return Color(int.parse(hexColor, radix: 16));
-  }
-
-  @override
-  void dispose() {
-    _wifiService.disconnect();
-    _watchWifiService.disconnect();
-    _ipController.dispose();
-    _watchIpController.dispose();
-    super.dispose();
-  }
-}
+                child: const Text_
+
