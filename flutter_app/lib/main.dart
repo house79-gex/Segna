@@ -231,7 +231,7 @@ class _ControllerPageState extends State<ControllerPage> {
                         children: [
                           Row(
                             mainAxisAlignment: MainAxisAlignment.center,
-                            children: const [
+                            children: [
                               Icon(Icons.router, size: 24),
                               SizedBox(width: 8),
                               Text('ESP32', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -246,7 +246,7 @@ class _ControllerPageState extends State<ControllerPage> {
                               border: OutlineInputBorder(),
                               contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                             ),
-                            keyboardType: TextInputType.numberWithOptions(decimal: true),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: false),
                             style: const TextStyle(fontSize: 14),
                           ),
                           const SizedBox(height: 8),
@@ -281,7 +281,7 @@ class _ControllerPageState extends State<ControllerPage> {
                         children: [
                           Row(
                             mainAxisAlignment: MainAxisAlignment.center,
-                            children: const [
+                            children: [
                               Icon(Icons.watch, size: 24),
                               SizedBox(width: 8),
                               Text('Watch', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -296,7 +296,7 @@ class _ControllerPageState extends State<ControllerPage> {
                               border: OutlineInputBorder(),
                               contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                             ),
-                            keyboardType: TextInputType.numberWithOptions(decimal: true),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: false),
                             style: const TextStyle(fontSize: 14),
                           ),
                           const SizedBox(height: 8),
