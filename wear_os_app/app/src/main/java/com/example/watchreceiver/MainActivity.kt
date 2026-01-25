@@ -244,87 +244,152 @@ fun WatchReceiverApp(
     fontSize: Int,
     onFontSizeChange: (Int) -> Unit
 ) {
-    var showFontControls by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
     
     Scaffold(
         timeText = { }
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black),
-            contentAlignment = Alignment.Center
-        ) {
-            if (isDisplayMode) {
-                // Modalità display
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
+        if (showSettings) {
+            // ═══ SCHERMATA SETTINGS ═══
+            SettingsScreen(
+                fontSize = fontSize,
+                onFontSizeChange = onFontSizeChange,
+                onClose = { showSettings = false }
+            )
+        } else {
+            // ═══ SCHERMATA PRINCIPALE ═══
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+            ) {
+                // Contenuto centrale
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
                 ) {
-                    // Lettera grande
-                    Text(
-                        text = letter,
-                        fontSize = fontSize.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = color,
-                        textAlign = TextAlign.Center
-                    )
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    // Pulsante per mostrare/nascondere controlli
-                    Button(
-                        onClick = { showFontControls = !showFontControls },
-                        modifier = Modifier.size(50.dp)
-                    ) {
+                    if (isDisplayMode) {
+                        // Modalità display: solo lettera
                         Text(
-                            text = if (showFontControls) "✓" else "Aa",
-                            fontSize = 16.sp
+                            text = letter,
+                            fontSize = fontSize.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = color,
+                            textAlign = TextAlign.Center
+                        )
+                    } else {
+                        // Modalità vibrazione: solo icona GRIGIA
+                        Text(
+                            text = "📳",
+                            fontSize = 60.sp,
+                            color = Color(0xFF808080),  // Grigio
+                            textAlign = TextAlign.Center
                         )
                     }
-                    
-                    // Controlli dimensione (solo se showFontControls = true)
-                    if (showFontControls) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Button(
-                                onClick = { 
-                                    if (fontSize > 40) onFontSizeChange(fontSize - 10)
-                                },
-                                modifier = Modifier.size(40.dp)
-                            ) {
-                                Text("-", fontSize = 20.sp)
-                            }
-                            
-                            Text(
-                                text = "${fontSize}",
-                                color = Color.White,
-                                fontSize = 14.sp
-                            )
-                            
-                            Button(
-                                onClick = { 
-                                    if (fontSize < 120) onFontSizeChange(fontSize + 10)
-                                },
-                                modifier = Modifier.size(40.dp)
-                            ) {
-                                Text("+", fontSize = 20.sp)
-                            }
-                        }
+                }
+                
+                // Icona ingranaggio (top-right corner)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(8.dp),
+                    contentAlignment = Alignment.TopEnd
+                ) {
+                    Button(
+                        onClick = { showSettings = true },
+                        modifier = Modifier.size(36.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = Color(0x80000000)  // Nero semi-trasparente
+                        )
+                    ) {
+                        Text(
+                            text = "⚙",
+                            fontSize = 18.sp,
+                            color = Color.White
+                        )
                     }
                 }
-            } else {
-                // Modalità vibrazione: solo icona GRIGIA
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingsScreen(
+    fontSize: Int,
+    onFontSizeChange: (Int) -> Unit,
+    onClose: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF1A1A1A)),  // Grigio scuro
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Titolo
+            Text(
+                text = "Settings",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // Label dimensione font
+            Text(
+                text = "Font Size",
+                fontSize = 12.sp,
+                color = Color.Gray
+            )
+            
+            // Controlli dimensione
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Button(
+                    onClick = { 
+                        if (fontSize > 40) onFontSizeChange(fontSize - 10)
+                    },
+                    modifier = Modifier.size(45.dp),
+                    enabled = fontSize > 40
+                ) {
+                    Text("-", fontSize = 24.sp)
+                }
+                
                 Text(
-                    text = "📳",
-                    fontSize = 60.sp,
-                    color = Color(0xFF808080),  // ← Grigio come "?"
-                    textAlign = TextAlign.Center
+                    text = "$fontSize",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
                 )
+                
+                Button(
+                    onClick = { 
+                        if (fontSize < 120) onFontSizeChange(fontSize + 10)
+                    },
+                    modifier = Modifier.size(45.dp),
+                    enabled = fontSize < 120
+                ) {
+                    Text("+", fontSize = 24.sp)
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // Pulsante chiudi
+            Button(
+                onClick = onClose,
+                modifier = Modifier
+                    .fillMaxWidth(0.7f)
+                    .height(40.dp)
+            ) {
+                Text("Close", fontSize = 14.sp)
             }
         }
     }
