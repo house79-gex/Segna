@@ -29,6 +29,21 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  String _getVibrationPatternLabel(String pattern) {
+    switch (pattern) {
+      case 'numeric':
+        return 'Numerico (A=1, B=2, C=3, D=4, E=5 vibrazioni)';
+      case 'morse':
+        return 'Morse (Corta/lunga distintivi)';
+      case 'intensity':
+        return 'Intensità (Forza crescente A→E)';
+      case 'melodic':
+        return 'Melodico (Pattern ritmici unici)';
+      default:
+        return 'Numerico';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -97,6 +112,26 @@ class _SettingsPageState extends State<SettingsPage> {
                   });
                 },
               ),
+            ),
+          ),
+          ListTile(
+            title: const Text('Tipo Pattern Vibrazione'),
+            subtitle: Text(_getVibrationPatternLabel(_settings.vibrationPattern)),
+            trailing: DropdownButton<String>(
+              value: _settings.vibrationPattern,
+              items: const [
+                DropdownMenuItem(value: 'numeric', child: Text('Numerico')),
+                DropdownMenuItem(value: 'morse', child: Text('Morse')),
+                DropdownMenuItem(value: 'intensity', child: Text('Intensità')),
+                DropdownMenuItem(value: 'melodic', child: Text('Melodico')),
+              ],
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() {
+                    _settings.vibrationPattern = value;
+                  });
+                }
+              },
             ),
           ),
           SwitchListTile(

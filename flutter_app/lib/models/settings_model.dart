@@ -7,6 +7,7 @@ class SettingsModel {
   int vibrationPause;
   bool resetVibrationEnabled;
   int resetVibrationDuration;
+  String vibrationPattern; // numeric, morse, intensity, melodic
 
   // ESP32 settings
   bool ledAlwaysOn;
@@ -21,6 +22,7 @@ class SettingsModel {
     this.vibrationPause = 200,
     this.resetVibrationEnabled = true,
     this.resetVibrationDuration = 800,
+    this.vibrationPattern = 'numeric',
     this.ledAlwaysOn = true,
     this.ledDuration = 3000,
     this.blinkAlertEnabled = true,
@@ -37,6 +39,7 @@ class SettingsModel {
       vibrationPause: prefs.getInt('vibrationPause') ?? 200,
       resetVibrationEnabled: prefs.getBool('resetVibrationEnabled') ?? true,
       resetVibrationDuration: prefs.getInt('resetVibrationDuration') ?? 800,
+      vibrationPattern: prefs.getString('vibrationPattern') ?? 'numeric',
       ledAlwaysOn: prefs.getBool('ledAlwaysOn') ?? true,
       ledDuration: prefs.getInt('ledDuration') ?? 3000,
       blinkAlertEnabled: prefs.getBool('blinkAlertEnabled') ?? true,
@@ -53,6 +56,7 @@ class SettingsModel {
     await prefs.setInt('vibrationPause', vibrationPause);
     await prefs.setBool('resetVibrationEnabled', resetVibrationEnabled);
     await prefs.setInt('resetVibrationDuration', resetVibrationDuration);
+    await prefs.setString('vibrationPattern', vibrationPattern);
     await prefs.setBool('ledAlwaysOn', ledAlwaysOn);
     await prefs.setInt('ledDuration', ledDuration);
     await prefs.setBool('blinkAlertEnabled', blinkAlertEnabled);
@@ -67,6 +71,7 @@ class SettingsModel {
         'vibrationMode': vibrationModeEnabled,
         'vibrationDuration': vibrationDuration,
         'vibrationPause': vibrationPause,
+        'vibrationPattern': vibrationPattern,
       },
       'esp32': {
         'alwaysOn': ledAlwaysOn,
