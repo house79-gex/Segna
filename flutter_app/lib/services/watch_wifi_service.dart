@@ -1,176 +1,100 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
-/// Service per comunicazione WiFi con Watch
-/// Invia comandi direttamente al Watch via HTTP POST
-/// 
-/// Example usage:
-/// ```dart
-/// final watchService = WatchWiFiService();
-/// 
-/// // Connect to watch
-/// final connected = await watchService.connect('192.168.0.124');
-/// if (connected) {
-///   // Send command
-///   await watchService.sendCommand('A', '#FFFFFF', 'WHITE', settings);
-/// }
-/// 
-/// // Disconnect when done
-/// watchService.disconnect();
-/// ```
-/// 
-/// Error handling:
-/// - All methods return bool indicating success/failure
-/// - Errors are logged to console with descriptive messages
-/// - Network timeouts are set to 3 seconds for responsive UX
 class WatchWiFiService {
-  String? _watchIp;
-  bool _isConnected = false;
+  String? watchIp;
+  bool isConnected = false;
   
-  // Getters for read-only access
-  String? get watchIp => _watchIp;
-  bool get isConnected => _isConnected;
-  
-  /// Connetti a Watch verificando raggiungibilità
-  /// @param ipAddress - Indirizzo IP del Watch (es: "192.168.0.124")
-  /// @return true se la connessione è riuscita
-  Future<bool> connect(String ipAddress) async {
+  Future<bool> connect(String ip) async {
     try {
-      print('🔌 Tentativo connessione a Watch: $ipAddress');
+      print('🔌 Tentativo connessione a Watch: $ip');
       
       final response = await http
-          .get(Uri.parse('http://$ipAddress:5000/status'))
-          .timeout(const Duration(seconds: 3));
+          .get(Uri.parse('http://$ip:5000/status'))
+          .timeout(Duration(seconds: 3));
       
       if (response.statusCode == 200) {
-        _watchIp = ipAddress;
-        _isConnected = true;
-        print('✅ Connesso a Watch: $ipAddress');
+        watchIp = ip;
+        isConnected = true;
+        print('✅ Connesso a Watch: $ip:5000');
         return true;
-      } else {
-        print('❌ Watch risponde con status code: ${response.statusCode}');
       }
     } catch (e) {
-      print('❌ Errore connessione a Watch: $e');
+      print('❌ Errore connessione Watch: $e');
     }
     
-    _isConnected = false;
-    _watchIp = null;
+    isConnected = false;
     return false;
   }
   
-  /// Invia comando al Watch
-  /// @param letter - Lettera da visualizzare (A-E)
-  /// @param color - Colore in formato hex (es: "#FF0000")
-  /// @param colorName - Nome colore (opzionale, per debug)
-  /// @param settings - Impostazioni complete del sistema
-  /// @return true se l'invio è riuscito
-  Future<bool> sendCommand(
-    String letter, 
-    String color, 
-    String colorName,
-    Map<String, dynamic> settings
-  ) async {
-    if (!_isConnected || _watchIp == null) {
-      print('❌ Non connesso a Watch');
+  void disconnect() {
+    watchIp = null;
+    isConnected = false;
+    print('🔌 Disconnesso da Watch');
+  }
+  
+  Future<bool> sendLetter(String letter, String colorHex, String colorName, Map<String, dynamic> settings) async {
+    if (!isConnected || watchIp == null) {
+      print('⚠️ Watch non connesso');
       return false;
     }
     
     try {
-      final data = {
+      final payload = {
         'letter': letter,
-        'color': color,
+        'color': colorHex,
         'colorName': colorName,
         'settings': settings,
       };
       
-      print('📤 Invio comando a Watch: $letter ($colorName)');
-      
-      final response = await http.post(
-        Uri.parse('http://$_watchIp:5000/command'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(data),
-      ).timeout(const Duration(seconds: 3));
+      final response = await http
+          .post(
+            Uri.parse('http://$watchIp:5000/command'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(payload),
+          )
+          .timeout(Duration(seconds: 3));
       
       if (response.statusCode == 200) {
         print('✅ Comando inviato a Watch: $letter');
         return true;
       } else {
-        print('❌ Watch risponde con errore: ${response.statusCode}');
-        print('   Body: ${response.body}');
+        print('❌ Watch risposta: ${response.statusCode}');
+        return false;
       }
     } catch (e) {
-      print('❌ Errore invio comando a Watch: $e');
+      print('❌ Errore invio Watch: $e');
+      return false;
     }
-    
-    return false;
   }
   
-  /// Invia comando RESET al Watch
-  /// @param settings - Impostazioni complete del sistema
-  /// @return true se l'invio è riuscito
   Future<bool> sendReset(Map<String, dynamic> settings) async {
-    if (!_isConnected || _watchIp == null) {
-      print('❌ Non connesso a Watch');
+    if (!isConnected || watchIp == null) {
       return false;
     }
     
     try {
-      final data = {
+      final payload = {
         'command': 'RESET',
         'settings': settings,
       };
       
-      print('🔄 Invio comando RESET a Watch');
-      
-      final response = await http.post(
-        Uri.parse('http://$_watchIp:5000/command'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(data),
-      ).timeout(const Duration(seconds: 3));
+      final response = await http
+          .post(
+            Uri.parse('http://$watchIp:5000/command'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(payload),
+          )
+          .timeout(Duration(seconds: 3));
       
       if (response.statusCode == 200) {
-        print('✅ RESET inviato a Watch');
+        print('✅ Reset inviato a Watch');
         return true;
-      } else {
-        print('❌ Watch risponde con errore: ${response.statusCode}');
       }
-    } catch (e) {
-      print('❌ Errore invio reset a Watch: $e');
-    }
-    
-    return false;
-  }
-  
-  /// Verifica se Watch è ancora raggiungibile
-  /// @return true se Watch risponde
-  Future<bool> checkConnection() async {
-    if (_watchIp == null) return false;
-    
-    try {
-      final response = await http
-          .get(Uri.parse('http://$_watchIp:5000/status'))
-          .timeout(const Duration(seconds: 2));
-      
-      return response.statusCode == 200;
-    } catch (e) {
       return false;
-    }
-  }
-  
-  /// Disconnetti da Watch
-  void disconnect() {
-    _isConnected = false;
-    _watchIp = null;
-    print('🔌 Disconnesso da Watch');
-  }
-  
-  /// Ottieni lo stato corrente di connessione
-  String getConnectionStatus() {
-    if (_isConnected && _watchIp != null) {
-      return 'Connesso a $_watchIp';
-    } else {
-      return 'Non connesso';
+    } catch (e) {
+      print('❌ Errore reset Watch: $e');
+      return false;
     }
   }
 }
