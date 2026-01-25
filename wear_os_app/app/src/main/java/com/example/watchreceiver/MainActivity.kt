@@ -2,6 +2,8 @@ package com.example.watchreceiver
 
 import android.os.Bundle
 import android.os.PowerManager
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.content.Context
 import android.util.Log
 import android.view.WindowManager
@@ -15,10 +17,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.*
-import com.example.watchreceiver.ui.theme.WatchReceiverTheme
 import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
@@ -29,22 +29,27 @@ class MainActivity : ComponentActivity() {
     
     private var watchServer: WatchServer? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var vibrator: Vibrator? = null
     
-    // Stato per UI
+    // Stato UI
     private val _currentLetter = mutableStateOf("?")
     private val _currentColor = mutableStateOf(Color.Gray)
+    private val _isDisplayMode = mutableStateOf(true)
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        Log.d(TAG, "🚀 Avvio applicazione Watch Receiver")
+        Log.d(TAG, "🚀 Avvio Watch Receiver")
         
-        // ↓↓↓ KEEP SCREEN ALWAYS ON ↓↓↓
+        // Schermo sempre acceso (solo window flags, no BRIGHT_WAKE_LOCK)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
         window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
         window.addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD)
-        Log.d(TAG, "🔒 Schermo forzato sempre acceso")
+        Log.d(TAG, "🔒 Window flags impostati")
+        
+        // Inizializza vibrator
+        vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
         
         // Avvia server HTTP
         watchServer = WatchServer { message ->
@@ -58,123 +63,176 @@ class MainActivity : ComponentActivity() {
             Log.e(TAG, "❌ Errore avvio server: ${e.message}", e)
         }
         
-        // Acquisisci WakeLock BRIGHT per mantenere schermo acceso
+        // WakeLock PARTIAL (leggero, solo per server)
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
-            PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
-            "WatchReceiver::ScreenWakeLock"
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "WatchReceiver::ServerWakeLock"
         )
         wakeLock?.acquire()
-        Log.d(TAG, "🔓 WakeLock BRIGHT acquisito - schermo sempre acceso")
+        Log.d(TAG, "🔓 WakeLock PARTIAL acquisito")
         
         setContent {
-            WatchReceiverTheme {
-                WatchReceiverScreen(
-                    letter = _currentLetter.value,
-                    color = _currentColor.value
-                )
-            }
+            WatchReceiverScreen(
+                letter = _currentLetter.value,
+                color = _currentColor.value,
+                isDisplayMode = _isDisplayMode.value
+            )
         }
     }
     
     override fun onResume() {
         super.onResume()
-        // Forza schermo acceso quando app torna in foreground
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        Log.d(TAG, "▶️ onResume - schermo forzato acceso")
+        Log.d(TAG, "▶️ onResume")
     }
     
     override fun onDestroy() {
         super.onDestroy()
-        
-        // Ferma server
         watchServer?.stop()
-        Log.d(TAG, "🛑 Server HTTP fermato")
-        
-        // Rilascia WakeLock
         if (wakeLock?.isHeld == true) {
             wakeLock?.release()
-            Log.d(TAG, "🔓 WakeLock rilasciato")
         }
+        Log.d(TAG, "🛑 Server fermato")
     }
     
-    /**
-     * Gestisce i messaggi ricevuti dal server HTTP
-     */
     private fun handleReceivedMessage(message: String) {
         try {
-            Log.d(TAG, "📥 Messaggio ricevuto: $message")
+            Log.d(TAG, "📥 Messaggio: $message")
             
             val json = JSONObject(message)
             
-            // Controlla se è un comando RESET
+            // Comando RESET
             if (json.has("command") && json.getString("command") == "RESET") {
-                Log.d(TAG, "🔄 Comando RESET ricevuto")
-                resetDisplay()
+                Log.d(TAG, "🔄 RESET")
+                handleReset(json)
                 return
             }
             
-            // Altrimenti gestisci come lettera
+            // Comando lettera
             if (json.has("letter") && json.has("color")) {
                 val letter = json.getString("letter")
                 val colorHex = json.getString("color")
                 
-                Log.d(TAG, "🎨 Lettera ricevuta: $letter, colore: $colorHex")
+                Log.d(TAG, "🎨 $letter - $colorHex")
                 
-                // Converti hex a Color
-                val color = parseColor(colorHex)
+                // Leggi settings
+                val settings = if (json.has("settings")) {
+                    json.getJSONObject("settings").getJSONObject("watch")
+                } else null
                 
-                // Aggiorna UI
-                _currentLetter.value = letter
-                _currentColor.value = color
+                val vibrationMode = settings?.optBoolean("vibrationMode", false) ?: false
                 
-                Log.d(TAG, "✅ Display aggiornato: $letter con colore $colorHex")
-            } else {
-                Log.w(TAG, "⚠️ Formato messaggio non valido: mancano 'letter' o 'color'")
+                if (vibrationMode) {
+                    // Modalità vibrazione
+                    _isDisplayMode.value = false
+                    handleVibration(letter, settings)
+                    Log.d(TAG, "📳 Vibration mode activated")
+                } else {
+                    // Modalità display
+                    _isDisplayMode.value = true
+                    _currentLetter.value = letter
+                    _currentColor.value = parseColor(colorHex)
+                    Log.d(TAG, "📺 Display mode activated")
+                }
             }
-            
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Errore parsing messaggio: ${e.message}", e)
+            Log.e(TAG, "❌ Errore: ${e.message}", e)
         }
     }
     
-    /**
-     * Reset del display
-     */
-    private fun resetDisplay() {
+    private fun handleReset(json: JSONObject) {
         _currentLetter.value = "?"
         _currentColor.value = Color.Gray
-        Log.d(TAG, "🔄 Display resettato")
+        _isDisplayMode.value = true
+        
+        // Vibrazione reset (lunga)
+        try {
+            val settings = if (json.has("settings")) {
+                json.getJSONObject("settings").getJSONObject("watch")
+            } else null
+            
+            val duration = settings?.optInt("vibrationDuration", 700) ?: 700
+            
+            vibrator?.vibrate(
+                VibrationEffect.createOneShot(
+                    duration.toLong(),
+                    VibrationEffect.DEFAULT_AMPLITUDE
+                )
+            )
+            Log.d(TAG, "📳 Reset vibration: ${duration}ms")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Errore vibrazione reset: ${e.message}")
+        }
     }
     
-    /**
-     * Converte stringa colore hex (#RRGGBB) in Color
-     */
+    private fun handleVibration(letter: String, settings: JSONObject?) {
+        try {
+            val pattern = settings?.optString("vibrationPattern", "numeric") ?: "numeric"
+            val duration = settings?.optInt("vibrationDuration", 300) ?: 300
+            val pause = settings?.optInt("vibrationPause", 200) ?: 200
+            
+            val count = when (letter) {
+                "A" -> 1
+                "B" -> 2
+                "C" -> 3
+                "D" -> 4
+                "E" -> 5
+                else -> 1
+            }
+            
+            val timings = if (pattern == "melodic") {
+                // Pattern melodico
+                when (letter) {
+                    "A" -> longArrayOf(0, 200, 100, 200)
+                    "B" -> longArrayOf(0, 150, 100, 150, 100, 150)
+                    "C" -> longArrayOf(0, 100, 50, 100, 50, 100, 50, 100)
+                    "D" -> longArrayOf(0, 300, 150, 300)
+                    "E" -> longArrayOf(0, 100, 100, 100, 100, 100)
+                    else -> longArrayOf(0, 300)
+                }
+            } else {
+                // Pattern numerico
+                val pattern = mutableListOf<Long>()
+                pattern.add(0) // Delay iniziale
+                repeat(count) {
+                    pattern.add(duration.toLong())
+                    if (it < count - 1) {
+                        pattern.add(pause.toLong())
+                    }
+                }
+                pattern.toLongArray()
+            }
+            
+            vibrator?.vibrate(
+                VibrationEffect.createWaveform(timings, -1)
+            )
+            
+            Log.d(TAG, "📳 Vibrazione $pattern: $letter ($count volte)")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Errore vibrazione: ${e.message}", e)
+        }
+    }
+    
     private fun parseColor(hex: String): Color {
         return try {
             val cleanHex = hex.removePrefix("#")
             val colorInt = android.graphics.Color.parseColor("#$cleanHex")
             Color(colorInt)
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Errore parsing colore: $hex", e)
             Color.Gray
         }
     }
 }
 
-/**
- * UI Composable per Wear OS
- */
 @Composable
 fun WatchReceiverScreen(
     letter: String = "?",
-    color: Color = Color.Gray
+    color: Color = Color.Gray,
+    isDisplayMode: Boolean = true
 ) {
     Scaffold(
-        timeText = {
-            // Rimuovi TimeText per evitare overlay orologio
-            // TimeText()
-        }
+        timeText = { }
     ) {
         Box(
             modifier = Modifier
@@ -182,13 +240,24 @@ fun WatchReceiverScreen(
                 .background(Color.Black),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = letter,
-                fontSize = 80.sp,
-                fontWeight = FontWeight.Bold,
-                color = color,
-                textAlign = TextAlign.Center
-            )
+            if (isDisplayMode) {
+                // Modalità display: mostra lettera colorata
+                Text(
+                    text = letter,
+                    fontSize = 80.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = color,
+                    textAlign = TextAlign.Center
+                )
+            } else {
+                // Modalità vibrazione: schermo nero
+                Text(
+                    text = "📳",
+                    fontSize = 60.sp,
+                    color = Color.Gray,
+                    textAlign = TextAlign.Center
+                )
+            }
         }
     }
 }
