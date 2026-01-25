@@ -1,6 +1,7 @@
 package com.example.watchreceiver
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.os.PowerManager
@@ -24,11 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.Text
 import com.google.android.gms.wearable.*
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import org.json.JSONObject
-import android.content.Intent
 
 class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListener {
 
@@ -43,17 +40,18 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
     private var wifiReceiver: WiFiReceiver? = null
     private var watchServer: WatchServer? = null
 
+    private val letterState = mutableStateOf("")
+    private val colorState = mutableStateOf(Color.BLACK)
+    private val isVibrationMode = mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Initialize Message Client
         messageClient = Wearable.getMessageClient(this)
         messageClient.addListener(this)
 
-        // Initialize Vibrator
         vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
 
-        // Acquire wake lock to keep app active
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
@@ -62,18 +60,15 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
             acquire()
         }
 
-        // Start Watch HTTP Server
         watchServer = WatchServer { message ->
             handleCommand(message)
         }
         watchServer?.start(5000)
         Log.d(TAG, "Server HTTP watch avviato")
 
-        // Load saved ESP32 IP from settings
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
         val esp32Ip = prefs.getString("esp32_ip", "192.168.0.100") ?: "192.168.0.100"
 
-        // Initialize WiFi Receiver for polling
         wifiReceiver = WiFiReceiver(esp32Ip) { letter, color ->
             runOnUiThread {
                 handleLetterReceived(letter, color)
@@ -81,7 +76,6 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         }
         wifiReceiver?.startPolling()
 
-        // Compose UI
         setContent {
             WatchReceiverScreen()
         }
@@ -96,8 +90,7 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
     }
 
     override fun onBackPressed() {
-        // Disable back button to prevent accidental app closure
-        // App can only be closed via remote command or manual force stop
+        // Disabled
     }
 
     override fun onMessageReceived(messageEvent: MessageEvent) {
@@ -112,7 +105,6 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         try {
             val jsonObject = JSONObject(message)
 
-            // Check for close app command
             if (jsonObject.optBoolean("closeApp", false)) {
                 Log.d(TAG, "Comando chiusura app ricevuto")
                 wakeLock?.release()
@@ -121,8 +113,7 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
             }
 
             if (jsonObject.has("command") && jsonObject.getString("command") == "RESET") {
-                // Gestione comando RESET
-                android.util.Log.d(TAG, "Processing RESET command")
+                Log.d(TAG, "Processing RESET command")
                 
                 val settings = if (jsonObject.has("settings")) {
                     jsonObject.getJSONObject("settings")
@@ -143,18 +134,16 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
 
                 runOnUiThread {
                     letterState.value = ""
-                    colorState.value = android.graphics.Color.BLACK
+                    colorState.value = Color.BLACK
                     isVibrationMode.value = false
-                    
                     Toast.makeText(this, "RESET eseguito", Toast.LENGTH_SHORT).show()
                 }
 
             } else if (jsonObject.has("letter")) {
                 val letter = jsonObject.getString("letter")
                 val colorHex = jsonObject.getString("color")
-                val color = android.graphics.Color.parseColor(colorHex)
+                val color = Color.parseColor(colorHex)
 
-                // Leggi impostazioni
                 val settings = if (jsonObject.has("settings")) {
                     jsonObject.getJSONObject("settings")
                 } else null
@@ -173,18 +162,14 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                 }
 
                 if (vibrationMode && vibrator?.hasVibrator() == true) {
-                    android.util.Log.d(TAG, "Vibration mode activated")
+                    Log.d(TAG, "Vibration mode activated: $vibrationPattern")
                     
-                    // Modalità vibrazione: schermo nero
                     runOnUiThread {
                         isVibrationMode.value = true
-                        colorState.value = android.graphics.Color.BLACK
+                        colorState.value = Color.BLACK
                         letterState.value = ""
                     }
 
-                    android.util.Log.d(TAG, "Pattern vibrazione: $vibrationPattern")
-
-                    // Costruisci pattern vibrazioni
                     val pattern: LongArray = when (vibrationPattern) {
                         "morse" -> {
                             when (letter) {
@@ -220,7 +205,6 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                         }
                         
                         else -> {
-                            // "numeric" (default)
                             val vibrationCount = when (letter) {
                                 "A" -> 1
                                 "B" -> 2
@@ -244,32 +228,25 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                         }
                     }
 
-                    // Esegui vibrazione
                     try {
                         vibrator?.vibrate(VibrationEffect.createWaveform(pattern, -1))
                     } catch (e: Exception) {
-                        android.util.Log.e(TAG, "Errore vibrazione: ${e.message}")
+                        Log.e(TAG, "Errore vibrazione: ${e.message}")
                     }
                     
                 } else {
-                    // Modalità display normale
-                    android.util.Log.d(TAG, "Display mode activated")
+                    Log.d(TAG, "Display mode activated")
                     
                     runOnUiThread {
                         isVibrationMode.value = false
                         letterState.value = letter
                         colorState.value = color
-                        
-                        Toast.makeText(
-                            this, 
-                            "Mostro: $letter", 
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        Toast.makeText(this, "Mostro: $letter", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Errore parsing messaggio: ${e.message}")
+            Log.e(TAG, "Errore parsing messaggio: ${e.message}")
         }
     }
 
@@ -279,21 +256,11 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
             letterState.value = letter
             colorState.value = color
             isVibrationMode.value = false
-            
-            Toast.makeText(
-                this,
-                "Ricevuto via WiFi: $letter",
-                Toast.LENGTH_SHORT
-            ).show()
+            Toast.makeText(this, "Ricevuto via WiFi: $letter", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Log.e(TAG, "Errore conversione colore: ${e.message}")
         }
     }
-
-    // Compose State
-    private val letterState = mutableStateOf("")
-    private val colorState = mutableStateOf(Color.BLACK)
-    private val isVibrationMode = mutableStateOf(false)
 
     @Composable
     fun WatchReceiverScreen() {
@@ -303,14 +270,11 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    color = ComposeColor(colorState.value)
-                )
+                .background(color = ComposeColor(colorState.value))
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures(
                         onDragEnd = {
                             if (offsetX > swipeThreshold) {
-                                // Swipe right → Settings
                                 val intent = Intent(this@MainActivity, SettingsActivity::class.java)
                                 startActivity(intent)
                             }
@@ -324,14 +288,12 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
             contentAlignment = Alignment.Center
         ) {
             if (isVibrationMode.value) {
-                // Modalità vibrazione: schermo nero senza testo
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(ComposeColor.Black)
                 )
             } else if (letterState.value.isNotEmpty()) {
-                // Modalità display: mostra lettera
                 Text(
                     text = letterState.value,
                     fontSize = 120.sp,
@@ -342,7 +304,6 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                     }
                 )
             } else {
-                // Stato iniziale: schermo nero
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
@@ -362,7 +323,6 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                 }
             }
 
-            // Indicatore swipe per impostazioni
             if (offsetX > 50f) {
                 Box(
                     modifier = Modifier
@@ -375,10 +335,7 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = "⚙️",
-                        fontSize = 24.sp
-                    )
+                    Text(text = "⚙️", fontSize = 24.sp)
                 }
             }
         }
