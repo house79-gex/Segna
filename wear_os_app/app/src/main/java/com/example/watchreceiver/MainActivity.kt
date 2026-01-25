@@ -280,7 +280,7 @@ fun WatchReceiverApp(
                     } else {
                         // Modalità vibrazione: solo icona GRIGIA
                         Text(
-                            text = "📳",
+                            text = "〰",
                             fontSize = 60.sp,
                             color = Color(0xFF808080),  // Grigio
                             textAlign = TextAlign.Center
@@ -304,7 +304,7 @@ fun WatchReceiverApp(
                     ) {
                         Text(
                             text = "⚙",
-                            fontSize = 18.sp,
+                            fontSize = 22.sp,
                             color = Color.White
                         )
                     }
