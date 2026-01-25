@@ -11,7 +11,10 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    
+    <!-- Permission to disable keyguard and keep screen always on -->
+    <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
+    
     <!-- Wear OS features -->
     <uses-feature android:name="android.hardware.type.watch" />
 
@@ -33,7 +36,11 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="Segna Watch"
-            android:theme="@android:style/Theme.DeviceDefault">
+            android:theme="@android:style/Theme.DeviceDefault"
+            android:screenOrientation="portrait"
+            android:keepScreenOn="true"
+            android:turnScreenOn="true"
+            android:showWhenLocked="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
