@@ -271,7 +271,7 @@ class _ControllerPageState extends State<ControllerPage> {
                     child: Container(
                       decoration: BoxDecoration(
                         border: Border.all(
-                          color: _watchWifiService.isConnected ? Colors.green : Colors.grey,
+                          color: _watchWifiService.isConnected ? Colors.blue : Colors.grey,
                           width: 3,
                         ),
                         borderRadius: BorderRadius.circular(12),
