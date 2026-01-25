@@ -47,6 +47,7 @@ class MainActivity : ComponentActivity() {
     private var notificationManager: NotificationManager? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private lateinit var wifiReceiver: WiFiReceiver
+    private var watchServer: WatchServer? = null
 
     private val letterState = mutableStateOf("")
     private val colorState = mutableStateOf(android.graphics.Color.BLACK)
@@ -59,6 +60,13 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "WatchReceiver"
+        
+        // Amplitude constants for intensity pattern (0-255 range)
+        private const val AMPLITUDE_A = 128  // 50% intensity
+        private const val AMPLITUDE_B = 166  // 65% intensity
+        private const val AMPLITUDE_C = 204  // 80% intensity
+        private const val AMPLITUDE_D = 242  // 95% intensity
+        private const val AMPLITUDE_E = 255  // 100% intensity
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -80,27 +88,26 @@ class MainActivity : ComponentActivity() {
         vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         
-        // Initialize WiFi Receiver
+        // Initialize WiFi Receiver (kept for backwards compatibility with old smartphone versions)
         wifiReceiver = WiFiReceiver(this) { message ->
             handleCommand(message)
         }
         
-        // Carica IP ESP32 salvato e connetti automaticamente
-        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-        val savedIp = prefs.getString("esp32_ip", "")
-        if (!savedIp.isNullOrEmpty()) {
-            wifiReceiver.connect(savedIp)
-            Toast.makeText(this, "Connected to ESP32: $savedIp", Toast.LENGTH_SHORT).show()
-            android.util.Log.d(TAG, "Auto-connesso a ESP32: $savedIp")
-        } else {
-            android.util.Log.d(TAG, "Nessun IP ESP32 salvato. Configurare nelle impostazioni.")
-            Toast.makeText(this, "Configure ESP32 IP in settings", Toast.LENGTH_LONG).show()
+        // Initialize Watch Server (new push mechanism - primary communication method)
+        watchServer = WatchServer { command ->
+            handleCommand(command)
         }
         
-        android.util.Log.d(TAG, "WiFiReceiver initialized")
+        try {
+            watchServer?.start()
+            android.util.Log.d(TAG, "✅ WatchServer avviato su porta 5000")
+            Toast.makeText(this, "WatchServer avviato - pronto per comandi", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "❌ Errore avvio WatchServer: ${e.message}")
+            Toast.makeText(this, "Errore avvio server: ${e.message}", Toast.LENGTH_LONG).show()
+        }
         
-        // Toast all'avvio
-        Toast.makeText(this, "WatchReceiver started - WiFi mode", Toast.LENGTH_SHORT).show()
+        android.util.Log.d(TAG, "Watch pronto per ricevere comandi via WiFi")
         
         // Load settings
         loadSettings()
@@ -125,14 +132,6 @@ class MainActivity : ComponentActivity() {
         // Reload settings in case they changed
         loadSettings()
         
-        // Riconnetti se necessario
-        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-        val savedIp = prefs.getString("esp32_ip", "")
-        if (!savedIp.isNullOrEmpty() && !wifiReceiver.isConnected()) {
-            wifiReceiver.connect(savedIp)
-            android.util.Log.d(TAG, "Riconnesso a ESP32: $savedIp")
-        }
-        
         // Re-acquire wakelock if it expired
         if (wakeLock?.isHeld == false) {
             wakeLock?.acquire(10*60*1000L /*10 minutes*/)
@@ -148,6 +147,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         wakeLock?.release()
         wifiReceiver.disconnect()
+        watchServer?.stop()
         super.onDestroy()
     }
 
@@ -171,6 +171,165 @@ class MainActivity : ComponentActivity() {
     private fun openSettings() {
         val intent = Intent(this, SettingsActivity::class.java)
         startActivity(intent)
+    }
+    
+    /**
+     * Esegue pattern di vibrazione avanzati in base al tipo selezionato
+     * 
+     * @param letter Lettera da A a E (valori validi: "A", "B", "C", "D", "E")
+     * @param pattern Tipo di pattern: numeric, morse, intensity, melodic
+     * @param duration Durata base della vibrazione in ms
+     * @param pause Pausa tra vibrazioni in ms
+     * @throws IllegalStateException se vibrator non è disponibile
+     * 
+     * Nota: Tutte le vibrazioni usano coroutine su Dispatchers.Main per garantire
+     * l'esecuzione sul thread UI richiesto dall'API Vibrator Android
+     * 
+     * Se letter non è valido (A-E), verrà usato il pattern per "A" come fallback
+     */
+    private suspend fun executeVibrationPattern(
+        letter: String,
+        pattern: String,
+        duration: Long,
+        pause: Long
+    ) {
+        // Validate letter input
+        if (letter !in listOf("A", "B", "C", "D", "E")) {
+            android.util.Log.w(TAG, "Invalid letter '$letter', using 'A' as fallback")
+        }
+        
+        when (pattern) {
+            "numeric" -> executeNumericPattern(letter, duration, pause)
+            "morse" -> executeMorsePattern(letter, duration, pause)
+            "intensity" -> executeIntensityPattern(letter, duration)
+            "melodic" -> executeMelodicPattern(letter, duration, pause)
+            else -> executeNumericPattern(letter, duration, pause)
+        }
+    }
+    
+    /**
+     * Pattern Numerico: A=1, B=2, C=3, D=4, E=5 vibrazioni
+     */
+    private suspend fun executeNumericPattern(letter: String, duration: Long, pause: Long) {
+        val count = when (letter) {
+            "A" -> 1
+            "B" -> 2
+            "C" -> 3
+            "D" -> 4
+            "E" -> 5
+            else -> 1
+        }
+        
+        for (i in 0 until count) {
+            vibrator?.vibrate(VibrationEffect.createOneShot(duration, VibrationEffect.DEFAULT_AMPLITUDE))
+            if (i < count - 1) {
+                delay(pause)
+            }
+        }
+    }
+    
+    /**
+     * Pattern Morse: Corta/lunga distintivi
+     * A: ·−    (corta-lunga)
+     * B: −···  (lunga-corta-corta-corta)
+     * C: −·−·  (lunga-corta-lunga-corta)
+     * D: −··   (lunga-corta-corta)
+     * E: ·     (corta)
+     */
+    private suspend fun executeMorsePattern(letter: String, duration: Long, pause: Long) {
+        val shortDuration = duration
+        val longDuration = duration * 3
+        val pattern = when (letter) {
+            "A" -> listOf(shortDuration, longDuration)
+            "B" -> listOf(longDuration, shortDuration, shortDuration, shortDuration)
+            "C" -> listOf(longDuration, shortDuration, longDuration, shortDuration)
+            "D" -> listOf(longDuration, shortDuration, shortDuration)
+            "E" -> listOf(shortDuration)
+            else -> listOf(shortDuration)
+        }
+        
+        pattern.forEachIndexed { index, vibDuration ->
+            vibrator?.vibrate(VibrationEffect.createOneShot(vibDuration, VibrationEffect.DEFAULT_AMPLITUDE))
+            if (index < pattern.size - 1) {
+                delay(pause)
+            }
+        }
+    }
+    
+    /**
+     * Pattern Intensità: Forza crescente A→E
+     * A: 50% intensità
+     * B: 65% intensità
+     * C: 80% intensità
+     * D: 95% intensità
+     * E: 100% intensità
+     */
+    private suspend fun executeIntensityPattern(letter: String, duration: Long) {
+        val amplitude = when (letter) {
+            "A" -> AMPLITUDE_A
+            "B" -> AMPLITUDE_B
+            "C" -> AMPLITUDE_C
+            "D" -> AMPLITUDE_D
+            "E" -> AMPLITUDE_E
+            else -> AMPLITUDE_E
+        }
+        
+        vibrator?.vibrate(VibrationEffect.createOneShot(duration * 2, amplitude))
+    }
+    
+    /**
+     * Pattern Melodico: Pattern ritmici unici per ogni lettera
+     * A: Ritmo semplice (·-·)
+     * B: Ritmo doppio (··-··)
+     * C: Ritmo triplo (···-···)
+     * D: Ritmo sincopato (·--·)
+     * E: Ritmo veloce (····)
+     */
+    private suspend fun executeMelodicPattern(letter: String, duration: Long, pause: Long) {
+        val shortPause = pause / 2
+        val patterns = when (letter) {
+            "A" -> listOf(
+                Triple(duration, pause, VibrationEffect.DEFAULT_AMPLITUDE),
+                Triple(duration * 2, pause, VibrationEffect.DEFAULT_AMPLITUDE),
+                Triple(duration, 0, VibrationEffect.DEFAULT_AMPLITUDE)
+            )
+            "B" -> listOf(
+                Triple(duration, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
+                Triple(duration, pause, VibrationEffect.DEFAULT_AMPLITUDE),
+                Triple(duration * 2, pause, VibrationEffect.DEFAULT_AMPLITUDE),
+                Triple(duration, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
+                Triple(duration, 0, VibrationEffect.DEFAULT_AMPLITUDE)
+            )
+            "C" -> listOf(
+                Triple(duration, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
+                Triple(duration, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
+                Triple(duration, pause, VibrationEffect.DEFAULT_AMPLITUDE),
+                Triple(duration * 2, pause, VibrationEffect.DEFAULT_AMPLITUDE),
+                Triple(duration, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
+                Triple(duration, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
+                Triple(duration, 0, VibrationEffect.DEFAULT_AMPLITUDE)
+            )
+            "D" -> listOf(
+                Triple(duration, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
+                Triple(duration * 2, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
+                Triple(duration * 2, pause, VibrationEffect.DEFAULT_AMPLITUDE),
+                Triple(duration, 0, VibrationEffect.DEFAULT_AMPLITUDE)
+            )
+            "E" -> listOf(
+                Triple(duration / 2, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
+                Triple(duration / 2, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
+                Triple(duration / 2, shortPause, VibrationEffect.DEFAULT_AMPLITUDE),
+                Triple(duration / 2, 0, VibrationEffect.DEFAULT_AMPLITUDE)
+            )
+            else -> listOf(Triple(duration, 0, VibrationEffect.DEFAULT_AMPLITUDE))
+        }
+        
+        patterns.forEach { (vibDuration, delayTime, amplitude) ->
+            vibrator?.vibrate(VibrationEffect.createOneShot(vibDuration, amplitude))
+            if (delayTime > 0) {
+                delay(delayTime)
+            }
+        }
     }
     
     private fun handleCommand(json: String) {
@@ -240,16 +399,18 @@ class MainActivity : ComponentActivity() {
                 var vibrationMode = false
                 var vibrationDuration = 300
                 var vibrationPause = 200
+                var vibrationPattern = "numeric"
 
                 if (settings != null && settings.has("watch")) {
                     val watchSettings = settings.getJSONObject("watch")
                     vibrationMode = watchSettings.optBoolean("vibrationMode", false)
                     vibrationDuration = watchSettings.optInt("vibrationDuration", 300)
                     vibrationPause = watchSettings.optInt("vibrationPause", 200)
+                    vibrationPattern = watchSettings.optString("vibrationPattern", "numeric")
                 }
 
                 if (vibrationMode && vibrator?.hasVibrator() == true) {
-                    android.util.Log.d(TAG, "Vibration mode activated")
+                    android.util.Log.d(TAG, "Vibration mode activated with pattern: $vibrationPattern")
                     
                     // Modalità vibrazione: schermo nero + vibrazioni
                     runOnUiThread {
@@ -258,27 +419,14 @@ class MainActivity : ComponentActivity() {
                         letterState.value = ""
                     }
 
-                    // Determina numero di vibrazioni in base alla lettera
-                    val vibrationCount = when (letter) {
-                        "A" -> 1
-                        "B" -> 2
-                        "C" -> 3
-                        "D" -> 4
-                        "E" -> 5
-                        else -> 1
-                    }
-
-                    // Esegui vibrazioni in coroutine
+                    // Esegui vibrazioni in base al pattern selezionato
                     CoroutineScope(Dispatchers.Main).launch {
-                        for (i in 0 until vibrationCount) {
-                            vibrator?.vibrate(VibrationEffect.createOneShot(
-                                vibrationDuration.toLong(),
-                                VibrationEffect.DEFAULT_AMPLITUDE
-                            ))
-                            if (i < vibrationCount - 1) {
-                                delay(vibrationPause.toLong())
-                            }
-                        }
+                        executeVibrationPattern(
+                            letter,
+                            vibrationPattern,
+                            vibrationDuration.toLong(),
+                            vibrationPause.toLong()
+                        )
                     }
                 } else {
                     android.util.Log.d(TAG, "Display mode activated")
