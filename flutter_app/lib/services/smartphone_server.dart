@@ -11,7 +11,7 @@ class SmartphoneServer {
   Future<String?> start() async {
     try {
       _server = await HttpServer.bind(InternetAddress.anyIPv4, 8080);
-      final localIp = _getLocalIp();
+      final localIp = await _getLocalIp(); // ⭐ AGGIUNTO await
       print('📡 Server smartphone avviato su $localIp:8080');
       
       _server!.listen((HttpRequest request) {
@@ -73,24 +73,28 @@ class SmartphoneServer {
     print('🔄 Stato reset per watch');
   }
   
-String _getLocalIp() {
-  try {
-    // NetworkInterface.list() è sincrono, ma senza parametri
-    final interfaces = NetworkInterface.list();
-    for (var interface in interfaces) {
-      for (var addr in interface.addresses) {
-        if (addr.type == InternetAddressType.IPv4 && 
-            !addr.isLoopback && 
-            !addr.address.startsWith('169.254')) {
-          return addr.address;
+  // ⭐ CAMBIATO: Future<String> invece di String
+  Future<String> _getLocalIp() async {
+    try {
+      // ⭐ AGGIUNTO await
+      final interfaces = await NetworkInterface.list(
+        includeLoopback: false,
+        type: InternetAddressType.IPv4
+      );
+      
+      for (var interface in interfaces) {
+        for (var addr in interface.addresses) {
+          if (addr.type == InternetAddressType.IPv4 && 
+              !addr.address.startsWith('169.254')) {
+            return addr.address;
+          }
         }
       }
+    } catch (e) {
+      print('⚠️ Errore rilevamento IP: $e');
     }
-  } catch (e) {
-    print('⚠️ Errore rilevamento IP: $e');
+    return 'unknown';
   }
-  return 'unknown';
-}
   
   void stop() {
     _server?.close();
