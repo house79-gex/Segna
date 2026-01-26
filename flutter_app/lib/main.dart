@@ -4,6 +4,7 @@ import 'models/settings_model.dart';
 import 'settings_page.dart';
 import 'services/wifi_communication_service.dart';
 import 'services/watch_wifi_service.dart';
+import 'services/android_receiver_service.dart';
 
 void main() {
   runApp(const MyApp());
@@ -35,9 +36,11 @@ class ControllerPage extends StatefulWidget {
 class _ControllerPageState extends State<ControllerPage> {
   final WiFiCommunicationService _wifiService = WiFiCommunicationService();
   final WatchWiFiService _watchWifiService = WatchWiFiService();
+  final AndroidReceiverService _androidReceiverService = AndroidReceiverService();
   
   final TextEditingController _ipController = TextEditingController(text: '192.168.0.125');
   final TextEditingController _watchIpController = TextEditingController(text: '192.168.0.124');
+  final TextEditingController _androidIpController = TextEditingController(text: '192.168.0.126');
 
   SettingsModel? settings;
 
@@ -115,6 +118,37 @@ class _ControllerPageState extends State<ControllerPage> {
     _showMessage('🔌 Disconnesso da Watch WiFi');
   }
 
+  Future<void> _connectToAndroidReceiver() async {
+    final ip = _androidIpController.text.trim();
+    if (ip.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('⚠️ Inserisci IP Android Receiver')),
+      );
+      return;
+    }
+
+    final success = await _androidReceiverService.connect(ip);
+    setState(() {});
+    
+    if (success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('✅ Connesso ad Android Receiver: $ip')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('❌ Connessione Android Receiver fallita')),
+      );
+    }
+  }
+
+  void _disconnectFromAndroidReceiver() {
+    _androidReceiverService.disconnect();
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('🔌 Android Receiver disconnesso')),
+    );
+  }
+
   Future<void> _sendCommand(String letter) async {
     if (settings == null) {
       _showError('⚠️ Impostazioni non caricate');
@@ -124,6 +158,7 @@ class _ControllerPageState extends State<ControllerPage> {
     final data = letterData[letter]!;
     bool esp32Success = false;
     bool watchSuccess = false;
+    bool androidSuccess = false;
 
     // Send to ESP32 via WiFi
     if (_wifiService.isConnected) {
@@ -151,13 +186,26 @@ class _ControllerPageState extends State<ControllerPage> {
       }
     }
 
+    // Invia ad Android Receiver
+    if (_androidReceiverService.isConnected) {
+      print('📤 Invio lettera ad Android Receiver: $letter (${data['colorName']})');
+      final commandData = {
+        'letter': letter,
+        'color': data['colorHex'],
+        'colorName': data['colorName'],
+        'settings': settings!.toJson(),
+      };
+      androidSuccess = await _androidReceiverService.sendCommand(commandData);
+    }
+
     // Show result
-    if (esp32Success && watchSuccess) {
-      _showMessage('✅ Comando inviato: $letter (ESP32 + Watch)');
-    } else if (esp32Success) {
-      _showMessage('✅ Comando inviato: $letter (solo ESP32)');
-    } else if (watchSuccess) {
-      _showMessage('✅ Comando inviato: $letter (solo Watch)');
+    List<String> connectedDevices = [];
+    if (esp32Success) connectedDevices.add('ESP32');
+    if (watchSuccess) connectedDevices.add('Watch');
+    if (androidSuccess) connectedDevices.add('Android');
+
+    if (connectedDevices.isNotEmpty) {
+      _showMessage('✅ Comando inviato: $letter (${connectedDevices.join(' + ')})');
     } else {
       _showError('❌ Nessun dispositivo connesso');
     }
@@ -176,7 +224,17 @@ class _ControllerPageState extends State<ControllerPage> {
       await _watchWifiService.sendReset(settings!.toResetJson());
     }
 
-    _showMessage('🔄 Reset inviato');
+    // Android Receiver
+    if (_androidReceiverService.isConnected) {
+      print('🔄 Invio comando RESET ad Android Receiver');
+      final resetData = {
+        'command': 'RESET',
+        'settings': settings!.toResetJson(),
+      };
+      await _androidReceiverService.sendCommand(resetData);
+    }
+
+    _showMessage('🔄 RESET inviato a tutti i dispositivi');
   }
 
   void _showError(String message) {
@@ -210,7 +268,7 @@ class _ControllerPageState extends State<ControllerPage> {
           children: [
             const SizedBox(height: 16),
             
-            // ═══ SEZIONE CONNESSIONI (2 colonne) ═══
+            // ═══ SEZIONE CONNESSIONI (3 colonne) ═══
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0),
               child: Row(
@@ -218,99 +276,47 @@ class _ControllerPageState extends State<ControllerPage> {
                 children: [
                   // ─── Colonna ESP32 ───
                   Expanded(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color: _wifiService.isConnected ? Colors.green : Colors.grey,
-                          width: 3,
-                        ),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.router, size: 24),
-                              SizedBox(width: 8),
-                              Text('ESP32', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          TextField(
-                            controller: _ipController,
-                            decoration: const InputDecoration(
-                              labelText: 'IP',
-                              hintText: '192.168.0.125',
-                              border: OutlineInputBorder(),
-                              contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                            ),
-                            keyboardType: const TextInputType.numberWithOptions(decimal: false),
-                            style: const TextStyle(fontSize: 14),
-                          ),
-                          const SizedBox(height: 8),
-                          ElevatedButton(
-                            onPressed: _wifiService.isConnected ? _disconnectFromESP32 : _connectToESP32,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: _wifiService.isConnected ? Colors.red : Colors.green,
-                              foregroundColor: Colors.white,
-                              minimumSize: const Size(double.infinity, 40),
-                            ),
-                            child: Text(_wifiService.isConnected ? 'Disconnetti' : 'Connetti'),
-                          ),
-                        ],
-                      ),
+                    child: _buildDeviceCard(
+                      title: 'ESP32',
+                      icon: Icons.router,
+                      controller: _ipController,
+                      hintText: '192.168.0.125',
+                      isConnected: _wifiService.isConnected,
+                      onConnect: _connectToESP32,
+                      onDisconnect: _disconnectFromESP32,
+                      buttonColor: Colors.green,
                     ),
                   ),
                   
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 8),
                   
                   // ─── Colonna Watch ───
                   Expanded(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color: _watchWifiService.isConnected ? Colors.blue : Colors.grey,
-                          width: 3,
-                        ),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.watch, size: 24),
-                              SizedBox(width: 8),
-                              Text('Watch', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          TextField(
-                            controller: _watchIpController,
-                            decoration: const InputDecoration(
-                              labelText: 'IP',
-                              hintText: '192.168.0.124',
-                              border: OutlineInputBorder(),
-                              contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                            ),
-                            keyboardType: const TextInputType.numberWithOptions(decimal: false),
-                            style: const TextStyle(fontSize: 14),
-                          ),
-                          const SizedBox(height: 8),
-                          ElevatedButton(
-                            onPressed: _watchWifiService.isConnected ? _disconnectFromWatchWiFi : _connectToWatchWiFi,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: _watchWifiService.isConnected ? Colors.red : Colors.blue,
-                              foregroundColor: Colors.white,
-                              minimumSize: const Size(double.infinity, 40),
-                            ),
-                            child: Text(_watchWifiService.isConnected ? 'Disconnetti' : 'Connetti'),
-                          ),
-                        ],
-                      ),
+                    child: _buildDeviceCard(
+                      title: 'Watch',
+                      icon: Icons.watch,
+                      controller: _watchIpController,
+                      hintText: '192.168.0.124',
+                      isConnected: _watchWifiService.isConnected,
+                      onConnect: _connectToWatchWiFi,
+                      onDisconnect: _disconnectFromWatchWiFi,
+                      buttonColor: Colors.blue,
+                    ),
+                  ),
+                  
+                  const SizedBox(width: 8),
+                  
+                  // ─── Colonna Android Receiver ───
+                  Expanded(
+                    child: _buildDeviceCard(
+                      title: 'Android',
+                      icon: Icons.smartphone,
+                      controller: _androidIpController,
+                      hintText: '192.168.0.126',
+                      isConnected: _androidReceiverService.isConnected,
+                      onConnect: _connectToAndroidReceiver,
+                      onDisconnect: _disconnectFromAndroidReceiver,
+                      buttonColor: Colors.orange,
                     ),
                   ),
                 ],
@@ -377,12 +383,77 @@ class _ControllerPageState extends State<ControllerPage> {
     );
   }
 
+  Widget _buildDeviceCard({
+    required String title,
+    required IconData icon,
+    required TextEditingController controller,
+    required String hintText,
+    required bool isConnected,
+    required VoidCallback onConnect,
+    required VoidCallback onDisconnect,
+    required Color buttonColor,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: isConnected ? Colors.green : Colors.grey,
+          width: 3,
+        ),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 20),
+              const SizedBox(width: 4),
+              Text(
+                title,
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: controller,
+            decoration: InputDecoration(
+              labelText: 'IP',
+              hintText: hintText,
+              border: const OutlineInputBorder(),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            ),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            style: const TextStyle(fontSize: 12),
+          ),
+          const SizedBox(height: 6),
+          ElevatedButton(
+            onPressed: isConnected ? onDisconnect : onConnect,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: isConnected ? Colors.red : buttonColor,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(double.infinity, 36),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+            ),
+            child: Text(
+              isConnected ? 'Disconnetti' : 'Connetti',
+              style: const TextStyle(fontSize: 11),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _wifiService.disconnect();
     _watchWifiService.disconnect();
+    _androidReceiverService.disconnect();
     _ipController.dispose();
     _watchIpController.dispose();
+    _androidIpController.dispose();
     super.dispose();
   }
 }
