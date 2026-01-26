@@ -1,6 +1,29 @@
 # Segna - Sistema di Comunicazione Multi-Dispositivo
 
-Sistema professionale di comunicazione in tempo reale tra smartphone, smartwatch e ESP32.
+Sistema professionale di comunicazione in tempo reale tra smartphone, smartwatch, ESP32 e dispositivi Android receiver.
+
+## 🆕 Aggiornamento Versione 3.1 - Android Receiver App
+
+### 📱 Nuova App: Android Receiver
+
+È stata aggiunta una nuova app Android nativa (`android_receiver_app/`) che permette di usare un **secondo smartphone Android** come dispositivo ricevitore con vibrazione. Funziona anche con **schermo spento** grazie a:
+
+#### ✨ Caratteristiche Principali
+- **Foreground Service**: Rimane attivo in background con notifica persistente
+- **WakeLock PARTIAL**: CPU attiva, schermo può dormire
+- **HTTP Server**: Porta 5001 (diversa dal Wear OS watch)
+- **Pattern vibrazione**: Identici al watch (numeric/melodic)
+- **Auto IP detection**: Rileva automaticamente IP locale
+- **UI minima**: Start/Stop server + visualizzazione IP
+
+#### 🔧 API Endpoints
+- `GET /status` - Verifica stato server
+- `POST /command` - Invia comandi di vibrazione (compatibile con app controller)
+
+#### 📖 Documentazione
+Vedi [android_receiver_app/README.md](./android_receiver_app/README.md) per istruzioni di build, installazione e integrazione con l'app controller Flutter.
+
+---
 
 ## 🆕 Aggiornamento Versione 3.0 - Wear OS Data Layer
 
@@ -15,31 +38,34 @@ Sistema professionale di comunicazione in tempo reale tra smartphone, smartwatch
 - **Più affidabile**: API ufficiali Google invece di BLE custom
 - **Compatibilità totale**: Funziona con tutti i device Wear OS
 
-### 🏗️ Nuova Architettura
+### 🏗️ Architettura Completa
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    SMARTPHONE (Flutter)                      │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │  UI: 5 Pulsanti + RESET + Chiudi App Watch           │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                          │                                   │
-│              ┌───────────┴───────────┐                      │
-│              │                       │                       │
-│      Wear OS Message API        BLE Direct                  │
-│     (Platform Channel)       (flutter_blue_plus)            │
-└──────────────┼───────────────────────┼──────────────────────┘
-               │                       │
-      ┌────────▼─────────┐    ┌───────▼────────┐
-      │   SMARTWATCH     │    │      ESP32      │
-      │   (Wear OS)      │    │  (BLE Server)   │
-      ├──────────────────┤    ├─────────────────┤
-      │ MessageClient    │    │ 5 LED Singoli   │
-      │ + Wakelock       │    │ GPIO 25-33      │
-      │ + No Back Button │    │                 │
-      └──────────────────┘    └─────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                    SMARTPHONE (Flutter)                           │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │  UI: 5 Pulsanti + RESET + Chiudi App Watch                 │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+│                          │                                        │
+│              ┌───────────┼────────────┐                          │
+│              │           │            │                           │
+│      Wear OS Message API │        BLE Direct                     │
+│     (Platform Channel)   │     (flutter_blue_plus)               │
+└──────────────┼────────────┼────────────┼──────────────────────────┘
+               │            │            │
+      ┌────────▼────┐  ┌───▼────┐  ┌───▼────────┐
+      │ SMARTWATCH  │  │ ANDROID│  │   ESP32     │
+      │  (Wear OS)  │  │RECEIVER│  │(BLE Server) │
+      ├─────────────┤  ├────────┤  ├─────────────┤
+      │MessageClient│  │  HTTP  │  │ 5 LED       │
+      │+ Wakelock   │  │ Server │  │ Singoli     │
+      │+ No Back Btn│  │:5001   │  │ GPIO 25-33  │
+      └─────────────┘  └────────┘  └─────────────┘
+      Vibrazione       Vibrazione   LED Visivi
+      (Message API)    (HTTP/WiFi)  (BLE)
 
 Wear OS: Message API via /segna_channel
+Android Receiver: HTTP Server su porta 5001
 ESP32: BLE UUID 4fafc201-1fb5-459e-8fcc-c5c9c331914b
 ```
 
@@ -98,6 +124,7 @@ Segna è un'applicazione distribuita che permette il controllo sincronizzato di 
 
 - **App Smartphone (Flutter)**: Interfaccia di controllo principale con 5 pulsanti colorati, impostazioni configurabili e chiusura remota watch
 - **App Smartwatch (Wear OS)**: Display visuale o modalità vibrazione, sempre attiva con wakelock
+- **App Android Receiver**: Secondo smartphone che riceve comandi HTTP e vibra (funziona con schermo spento)
 - **Firmware ESP32**: Controllore hardware per 5 LED singoli separati
 
 ### ✨ Funzionalità Complete
@@ -115,6 +142,13 @@ Segna è un'applicazione distribuita che permette il controllo sincronizzato di 
 - **App sempre attiva**: Wakelock + back button disabilitato
 - **Chiusura solo da smartphone**: Massimo controllo
 - Comunicazione tramite Wear OS Message API
+
+#### Android Receiver (Nuovo!)
+- **HTTP Server**: Porta 5001, compatibile con app controller
+- **Vibrazione pattern**: Numeric/Melodic identici al watch
+- **Foreground Service**: Rimane attivo con notifica persistente
+- **WakeLock PARTIAL**: Funziona con schermo spento
+- **UI minima**: Start/Stop server + visualizzazione IP
 
 #### ESP32
 - 5 LED singoli separati (uno per colore) invece di LED RGB
@@ -161,6 +195,20 @@ Segna/
 │                       └── example/
 │                           └── watchreceiver/
 │                               └── MainActivity.kt  # App smartwatch (Wear OS Message API)
+├── android_receiver_app/                # 🆕 NUOVO: Android Receiver
+│   ├── app/
+│   │   ├── src/main/
+│   │   │   ├── java/com/example/segnareceiver/
+│   │   │   │   ├── MainActivity.kt      # UI Start/Stop server
+│   │   │   │   ├── ReceiverService.kt   # Foreground service con WakeLock
+│   │   │   │   ├── AndroidServer.kt     # HTTP server (NanoHTTPD)
+│   │   │   │   └── VibrationHandler.kt  # Pattern vibrazione
+│   │   │   ├── res/                     # Layout e risorse
+│   │   │   └── AndroidManifest.xml      # Permessi
+│   │   └── build.gradle.kts
+│   ├── build.gradle.kts
+│   ├── settings.gradle.kts
+│   └── README.md                        # 📖 Documentazione Android Receiver
 ├── esp32_firmware/
 │   └── esp32_led_controller.ino        # Firmware ESP32 (invariato)
 ├── WEAR_OS_MIGRATION_GUIDE.md          # 📖 Guida completa migrazione Wear OS
@@ -170,6 +218,7 @@ Segna/
 
 ## 📖 Documentazione
 
+- **[android_receiver_app/README.md](./android_receiver_app/README.md)** - Guida completa all'Android Receiver: build, installazione, API e integrazione
 - **[WEAR_OS_MIGRATION_GUIDE.md](./WEAR_OS_MIGRATION_GUIDE.md)** - Guida completa alla migrazione da BLE a Wear OS Data Layer, troubleshooting e best practices
 - **[SAP_INTEGRATION_GUIDE.md](./SAP_INTEGRATION_GUIDE.md)** - Documentazione legacy su Samsung Accessory Protocol (non necessario con Wear OS)
 ├── esp32_firmware/
