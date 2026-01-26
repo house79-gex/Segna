@@ -424,7 +424,7 @@ class _ControllerPageState extends State<ControllerPage> {
               border: const OutlineInputBorder(),
               contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
             ),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            keyboardType: const TextInputType.numberWithOptions(decimal: false),
             style: const TextStyle(fontSize: 12),
           ),
           const SizedBox(height: 6),
