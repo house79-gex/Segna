@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Segna Receiver</string>
+    <string name="server_stopped">Server FERMO ⏸️</string>
+    <string name="server_active">Server ATTIVO ✅</string>
+    <string name="ip_detecting">IP: Rilevamento...</string>
+    <string name="start_server">AVVIA SERVER</string>
+    <string name="stop_server">FERMA SERVER</string>
+    <string name="vibration_mode">📳 Modalità vibrazione solo</string>
+</resources>
